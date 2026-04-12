@@ -18,16 +18,14 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression, RidgeCV
 from sklearn.metrics import r2_score
 from sklearn.model_selection import KFold
+from scipy.cluster.hierarchy import fcluster, leaves_list, linkage
+from scipy.spatial.distance import squareform
 
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW_DIR = ROOT / "data" / "raw"
 PROCESSED_DIR = ROOT / "data" / "processed" / "intermediate"
 OUTPUT_DIR = ROOT / "output"
-INTERMEDIATE_OUTPUT_DIR = OUTPUT_DIR / "intermediate"
-FIGURE_DIR = INTERMEDIATE_OUTPUT_DIR / "figures"
-TABLE_DIR = INTERMEDIATE_OUTPUT_DIR / "tables"
-REPORT_DIR = INTERMEDIATE_OUTPUT_DIR / "reports"
 STUDY_DIR = OUTPUT_DIR / "studies"
 BENCHMARK_STUDY_DIR = STUDY_DIR / "benchmark_level"
 TASK_STUDY_DIR = STUDY_DIR / "task_level"
@@ -38,6 +36,8 @@ PAPER_REPORT_DIR = PAPER_DIR / "reports"
 
 KEY_COLUMNS = ["model", "agent"]
 RANDOM_SEED = 42
+RELATIVE_SCORE_LABEL = "Benchmark-relative score (0 = benchmark median; +1 = one robust scale above median)"
+DELTA_SCORE_LABEL = "Change in benchmark-relative score vs terminus-2"
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,7 @@ def prepare_output_dirs() -> None:
         OUTPUT_DIR / "figures",
         OUTPUT_DIR / "tables",
         OUTPUT_DIR / "reports",
+        OUTPUT_DIR / "intermediate",
     ]
     for path in legacy_dirs:
         if path.exists():
@@ -72,9 +73,6 @@ def prepare_output_dirs() -> None:
 
     for path in [
         PROCESSED_DIR,
-        FIGURE_DIR,
-        TABLE_DIR,
-        REPORT_DIR,
         BENCHMARK_STUDY_DIR,
         TASK_STUDY_DIR,
         PAPER_TABLE_DIR,
@@ -627,7 +625,6 @@ def write_tables(
     }
     for name, table in tables.items():
         table.to_csv(PROCESSED_DIR / f"{name}.csv", index=False)
-        table.to_csv(TABLE_DIR / f"{name}.csv", index=False)
     return tables
 
 
@@ -760,10 +757,10 @@ def agent_model_scores_for_cols(
 ) -> pd.DataFrame:
     out = benchmark_result.normalized[KEY_COLUMNS].copy()
     out["agent_model"] = out["agent"] + " + " + out["model"]
-    out["mean_normalized_score"] = benchmark_result.normalized[cols].mean(axis=1)
-    out["median_normalized_score"] = benchmark_result.normalized[cols].median(axis=1)
+    out["mean_benchmark_relative_score"] = benchmark_result.normalized[cols].mean(axis=1)
+    out["median_benchmark_relative_score"] = benchmark_result.normalized[cols].median(axis=1)
     out["observed_fraction_on_included_benchmarks"] = raw_benchmark[cols].notna().mean(axis=1)
-    out["rank"] = out["mean_normalized_score"].rank(ascending=False, method="min").astype(int)
+    out["rank"] = out["mean_benchmark_relative_score"].rank(ascending=False, method="min").astype(int)
     return out.sort_values("rank")
 
 
@@ -920,12 +917,12 @@ def task_reliability_tables(item_stats: pd.DataFrame) -> tuple[pd.DataFrame, pd.
 
 
 def save_paper_agent_model_score_plot(scores: pd.DataFrame) -> None:
-    plot_df = scores.sort_values("mean_normalized_score").tail(18)
+    plot_df = scores.sort_values("mean_benchmark_relative_score").tail(18)
     labels = plot_df["agent_model"]
     fig, ax = plt.subplots(figsize=(11, 8))
-    ax.barh(labels, plot_df["mean_normalized_score"], color="#9ecae1", edgecolor="white")
+    ax.barh(labels, plot_df["mean_benchmark_relative_score"], color="#9ecae1", edgecolor="white")
     ax.set_title("Top Agent+Model Pairs on Included Benchmarks")
-    ax.set_xlabel("Mean normalized score")
+    ax.set_xlabel(f"Mean {RELATIVE_SCORE_LABEL.lower()}")
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
@@ -939,7 +936,7 @@ def save_paper_effect_plot(effects: pd.DataFrame, group_col: str, filename: str,
     ax.barh(plot_df[group_col], plot_df["adjusted_mean"], color="#a1d99b", edgecolor="white")
     ax.axvline(0, color="#666666", linewidth=1)
     ax.set_title(title)
-    ax.set_xlabel("Adjusted normalized score")
+    ax.set_xlabel(f"Adjusted {RELATIVE_SCORE_LABEL.lower()}")
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
@@ -961,7 +958,7 @@ def save_agent_lift_heatmap(agent_by_benchmark: pd.DataFrame) -> None:
     ax.set_yticks(np.arange(pivot.shape[0]))
     ax.set_yticklabels(pivot.index)
     cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
-    cbar.set_label("Mean normalized delta")
+    cbar.set_label(DELTA_SCORE_LABEL)
     fig.tight_layout()
     fig.savefig(PAPER_FIGURE_DIR / "benchmark_agent_lift_heatmap.png", dpi=200)
     plt.close(fig)
@@ -983,7 +980,7 @@ def save_benchmark_uniqueness_plot(uniqueness: pd.DataFrame, filter_table: pd.Da
     ax.axhline(0, color="#777777", linewidth=1)
     ax.set_title("Benchmark Uniqueness After Coverage Filtering")
     ax.set_xlabel("Observed agent+model rows")
-    ax.set_ylabel("CV R2 predicted by other included benchmarks")
+    ax.set_ylabel("Cross-validated R2 from other included benchmarks")
     ax.grid(color="#dddddd", linewidth=0.8)
     fig.tight_layout()
     fig.savefig(PAPER_FIGURE_DIR / "benchmark_uniqueness_vs_coverage.png", dpi=200)
@@ -1026,6 +1023,375 @@ def save_task_alignment_plot(alignment: pd.DataFrame) -> None:
     plt.close(fig)
 
 
+def benchmark_model_agent_role_by_benchmark(long_df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    rows = []
+    for benchmark in cols:
+        df = long_df[long_df["benchmark"] == benchmark].copy()
+        y = df["normalized_score"].astype(float)
+        model_r2 = fit_r2(df, y, ["model"])
+        agent_r2 = fit_r2(df, y, ["agent"])
+        full_r2 = fit_r2(df, y, ["model", "agent"])
+        rows.append(
+            {
+                "benchmark": benchmark,
+                "model_only_r2": model_r2,
+                "agent_only_r2": agent_r2,
+                "model_partial_r2_over_agent": full_r2 - agent_r2,
+                "agent_partial_r2_over_model": full_r2 - model_r2,
+                "full_model_plus_agent_r2": full_r2,
+                "dominant_dimension": "model"
+                if full_r2 - agent_r2 > full_r2 - model_r2
+                else "agent",
+            }
+        )
+    return pd.DataFrame(rows).sort_values("model_partial_r2_over_agent", ascending=False)
+
+
+def benchmark_similarity_clusters(corr: pd.DataFrame, n_clusters: int = 6) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    matrix = corr.set_index("benchmark")
+    matrix = matrix.loc[matrix.columns, matrix.columns].fillna(0)
+    distance_array = (1 - matrix.abs()).to_numpy(copy=True)
+    np.fill_diagonal(distance_array, 0)
+    condensed = squareform(distance_array, checks=False)
+    z = linkage(condensed, method="average")
+    order = matrix.index[leaves_list(z)].tolist()
+    labels = fcluster(z, t=n_clusters, criterion="maxclust")
+    clusters = pd.DataFrame({"benchmark": matrix.index, "similarity_cluster": labels})
+    clusters = clusters.sort_values(["similarity_cluster", "benchmark"]).reset_index(drop=True)
+    ordered_corr = matrix.loc[order, order].reset_index(names="benchmark")
+    return clusters, ordered_corr, order
+
+
+def save_benchmark_role_plot(role: pd.DataFrame) -> None:
+    plot_df = role.copy()
+    fig, ax = plt.subplots(figsize=(9, 7))
+    colors = np.where(plot_df["dominant_dimension"] == "model", "#9ecae1", "#fdae6b")
+    ax.scatter(
+        plot_df["model_partial_r2_over_agent"],
+        plot_df["agent_partial_r2_over_model"],
+        s=95,
+        color=colors,
+        edgecolor="white",
+        alpha=0.9,
+    )
+    lim = max(plot_df[["model_partial_r2_over_agent", "agent_partial_r2_over_model"]].max().max(), 0.05)
+    ax.plot([0, lim], [0, lim], color="#666666", linewidth=1)
+    for _, row in plot_df.sort_values("full_model_plus_agent_r2", ascending=False).head(14).iterrows():
+        ax.annotate(row["benchmark"], (row["model_partial_r2_over_agent"], row["agent_partial_r2_over_model"]), fontsize=10)
+    ax.set_title("Per-Benchmark Model vs Agent Explanatory Power")
+    ax.set_xlabel("Partial R2 added by model after controlling for agent")
+    ax.set_ylabel("Partial R2 added by agent after controlling for model")
+    ax.grid(color="#dddddd", linewidth=0.8)
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "benchmark_model_vs_agent_role.png", dpi=200)
+    plt.close(fig)
+
+
+def save_variance_paper_plot(variance_df: pd.DataFrame) -> None:
+    plot_df = variance_df[variance_df["component"] != "all_main_effects"].sort_values(
+        "partial_r2_over_other_main_effects"
+    )
+    fig, ax = plt.subplots(figsize=(10, 5.8))
+    ax.barh(plot_df["component"], plot_df["partial_r2_over_other_main_effects"], color="#bcbddc", edgecolor="white")
+    ax.set_title("Benchmark-Level Score Variance Attribution")
+    ax.set_xlabel("Partial R2: extra variance explained after other main effects")
+    ax.set_ylabel("")
+    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "benchmark_variance_attribution.png", dpi=200)
+    plt.close(fig)
+
+
+def save_benchmark_cluster_heatmap(ordered_corr: pd.DataFrame) -> None:
+    matrix = ordered_corr.set_index("benchmark")
+    fig, ax = plt.subplots(figsize=(14, 12))
+    image = ax.imshow(matrix.to_numpy(dtype=float), cmap="RdBu_r", vmin=-1, vmax=1)
+    ax.set_title("Clustered Benchmark Similarity")
+    ax.set_xticks(np.arange(matrix.shape[1]))
+    ax.set_xticklabels(matrix.columns, rotation=70, ha="right")
+    ax.set_yticks(np.arange(matrix.shape[0]))
+    ax.set_yticklabels(matrix.index)
+    cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
+    cbar.set_label("Spearman correlation of agent+model score profiles")
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "benchmark_similarity_clustered_heatmap.png", dpi=200)
+    plt.close(fig)
+
+
+def task_similarity_and_representatives(
+    task_result: ImputationResult,
+    tasks_enriched: pd.DataFrame,
+    benchmark_clusters: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    reliable = tasks_enriched[
+        tasks_enriched["is_bounded_score_task"]
+        & tasks_enriched["is_reliable_observed_task"]
+        & (tasks_enriched["observed_std"] >= 0.05)
+    ].copy()
+    reliable_columns = [col for col in reliable["task_column"] if col in task_result.normalized.columns]
+    matrix = task_result.normalized[reliable_columns].astype(float)
+    standardized = (matrix - matrix.mean(axis=0)) / matrix.std(axis=0, ddof=0).replace(0, np.nan)
+    standardized = standardized.fillna(0)
+    task_profiles = standardized.to_numpy().T
+    corr = (task_profiles @ task_profiles.T) / task_profiles.shape[1]
+    corr = np.clip(np.nan_to_num(corr), -1, 1)
+    np.fill_diagonal(corr, 1)
+    task_index = pd.Index(reliable_columns)
+    bench_for_task = reliable.set_index("task_column").loc[task_index, "benchmark"]
+
+    within_rows = []
+    representative_rows = []
+    predictability_rows = []
+    positions_by_benchmark: dict[str, list[int]] = {}
+    for position, benchmark in enumerate(bench_for_task.to_numpy()):
+        positions_by_benchmark.setdefault(str(benchmark), []).append(position)
+
+    for benchmark, positions in positions_by_benchmark.items():
+        idx = np.array(positions, dtype=int)
+        if len(idx) < 2:
+            continue
+        sub = np.abs(corr[np.ix_(idx, idx)])
+        np.fill_diagonal(sub, np.nan)
+        mean_peer = np.nanmean(sub, axis=1)
+        max_peer = np.nanmax(sub, axis=1)
+        within_rows.append(
+            {
+                "benchmark": benchmark,
+                "n_reliable_tasks": len(idx),
+                "median_abs_task_similarity_within_benchmark": float(np.nanmedian(sub)),
+                "mean_abs_task_similarity_within_benchmark": float(np.nanmean(sub)),
+            }
+        )
+        aggregate = task_profiles[idx].mean(axis=0)
+        aggregate_corr = np.array([corr_or_nan(task_profiles[i], aggregate) for i in idx])
+        for local_pos, task_idx in enumerate(idx):
+            task_col = task_index[task_idx]
+            task_row = reliable[reliable["task_column"] == task_col].iloc[0]
+            representative_rows.append(
+                {
+                    "benchmark": benchmark,
+                    "task_column": task_col,
+                    "task_id": task_row["task_id"],
+                    "representativeness_score": float(abs(aggregate_corr[local_pos])),
+                    "mean_abs_similarity_to_peer_tasks": float(mean_peer[local_pos]),
+                    "difficulty_tier": task_row["difficulty_tier"],
+                    "observed_mean": task_row["observed_mean"],
+                    "observed_std": task_row["observed_std"],
+                    "strength_correlation": task_row["strength_correlation"],
+                }
+            )
+            predictability_rows.append(
+                {
+                    "benchmark": benchmark,
+                    "task_column": task_col,
+                    "task_id": task_row["task_id"],
+                    "task_predictability_proxy_max_abs_peer_spearman": float(max_peer[local_pos]),
+                    "task_unpredictability_score": float(1 - max_peer[local_pos]),
+                    "observed_count": int(task_row["observed_count"]),
+                    "difficulty_tier": task_row["difficulty_tier"],
+                    "observed_mean": task_row["observed_mean"],
+                    "observed_std": task_row["observed_std"],
+                }
+            )
+
+    sampled = (
+        reliable.sort_values(["mix_selection_score", "observed_count"], ascending=False)
+        .groupby("benchmark")
+        .head(40)
+        .reset_index(drop=True)
+    )
+    sampled_cols = [col for col in sampled["task_column"] if col in task_index]
+    sampled_positions = task_index.get_indexer(sampled_cols)
+    pair_rows = []
+    for left_bench, left_group in sampled.groupby("benchmark"):
+        left_idx = task_index.get_indexer(left_group["task_column"])
+        for right_bench, right_group in sampled.groupby("benchmark"):
+            if right_bench < left_bench:
+                continue
+            right_idx = task_index.get_indexer(right_group["task_column"])
+            pair_corr = np.abs(corr[np.ix_(left_idx, right_idx)])
+            if left_bench == right_bench:
+                pair_corr = pair_corr[~np.eye(pair_corr.shape[0], dtype=bool)]
+            pair_rows.append(
+                {
+                    "left_benchmark": left_bench,
+                    "right_benchmark": right_bench,
+                    "median_abs_task_similarity": float(np.nanmedian(pair_corr)) if pair_corr.size else np.nan,
+                    "mean_abs_task_similarity": float(np.nanmean(pair_corr)) if pair_corr.size else np.nan,
+                    "sampled_left_tasks": len(left_idx),
+                    "sampled_right_tasks": len(right_idx),
+                }
+            )
+
+    within = pd.DataFrame(within_rows).sort_values("median_abs_task_similarity_within_benchmark", ascending=False)
+    representatives = pd.DataFrame(representative_rows).sort_values("representativeness_score", ascending=False)
+    task_predictability = pd.DataFrame(predictability_rows).sort_values("task_unpredictability_score", ascending=False)
+    cross = pd.DataFrame(pair_rows).sort_values("median_abs_task_similarity", ascending=False)
+    return within, representatives, task_predictability, cross
+
+
+def save_task_similarity_heatmap(cross_similarity: pd.DataFrame, benchmark_clusters: pd.DataFrame) -> None:
+    if cross_similarity.empty:
+        return
+    pivot = cross_similarity.pivot(index="left_benchmark", columns="right_benchmark", values="median_abs_task_similarity")
+    all_benchmarks = sorted(set(pivot.index) | set(pivot.columns))
+    pivot = pivot.reindex(index=all_benchmarks, columns=all_benchmarks)
+    for left in all_benchmarks:
+        for right in all_benchmarks:
+            if pd.isna(pivot.loc[left, right]) and right in pivot.index and left in pivot.columns:
+                pivot.loc[left, right] = pivot.loc[right, left]
+    pivot = pivot.fillna(0)
+    clusters = benchmark_clusters.set_index("benchmark")["similarity_cluster"]
+    order = sorted(all_benchmarks, key=lambda b: (clusters.get(b, 999), b))
+    pivot = pivot.loc[order, order]
+    fig, ax = plt.subplots(figsize=(14, 12))
+    image = ax.imshow(pivot.to_numpy(dtype=float), cmap="YlGnBu", vmin=0, vmax=1)
+    ax.set_title("Task Similarity Within and Across Benchmarks")
+    ax.set_xticks(np.arange(len(order)))
+    ax.set_xticklabels(order, rotation=70, ha="right")
+    ax.set_yticks(np.arange(len(order)))
+    ax.set_yticklabels(order)
+    cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
+    cbar.set_label("Median absolute Spearman correlation between reliable task score profiles")
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "task_similarity_benchmark_pair_heatmap.png", dpi=200)
+    plt.close(fig)
+
+
+def save_task_predictability_plot(task_predictability: pd.DataFrame) -> None:
+    plot_df = task_predictability.head(40).sort_values("task_unpredictability_score")
+    labels = plot_df["benchmark"] + " / " + plot_df["task_id"].astype(str).str.slice(0, 28)
+    fig, ax = plt.subplots(figsize=(12, 12))
+    ax.barh(labels, plot_df["task_unpredictability_score"], color="#fdae6b", edgecolor="white")
+    ax.set_title("Hard-to-Predict Reliable Tasks")
+    ax.set_xlabel("Task unpredictability proxy (1 - max absolute peer-task Spearman correlation)")
+    ax.set_ylabel("")
+    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "task_hard_to_predict_ranked.png", dpi=200)
+    plt.close(fig)
+
+
+def save_representative_task_plot(representatives: pd.DataFrame) -> None:
+    top = representatives.sort_values("representativeness_score", ascending=False).groupby("benchmark").head(1)
+    plot_df = top.sort_values("representativeness_score", ascending=True).tail(35)
+    labels = plot_df["benchmark"] + " / " + plot_df["task_id"].astype(str).str.slice(0, 26)
+    fig, ax = plt.subplots(figsize=(12, 10))
+    ax.barh(labels, plot_df["representativeness_score"], color="#a1d99b", edgecolor="white")
+    ax.set_title("Best Single Task Representative per Benchmark")
+    ax.set_xlabel("Absolute correlation with benchmark's reliable-task aggregate")
+    ax.set_ylabel("")
+    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "task_best_representatives.png", dpi=200)
+    plt.close(fig)
+
+
+def terminus_delta_by_model(agent_diff: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    filtered = agent_diff[agent_diff["benchmark"].isin(cols)].copy()
+    return (
+        filtered.groupby(["model", "agent"])
+        .agg(
+            mean_delta_vs_terminus=("delta_normalized", "mean"),
+            median_delta_vs_terminus=("delta_normalized", "median"),
+            win_rate_vs_terminus=("delta_normalized", lambda s: float((s > 0).mean())),
+            compared_benchmarks=("benchmark", "nunique"),
+        )
+        .reset_index()
+        .sort_values("mean_delta_vs_terminus", ascending=False)
+    )
+
+
+def save_terminus_delta_by_model_plot(terminus_by_model: pd.DataFrame) -> None:
+    if terminus_by_model.empty:
+        return
+    pivot = terminus_by_model.pivot(index="agent", columns="model", values="mean_delta_vs_terminus").fillna(0)
+    fig, ax = plt.subplots(figsize=(11, max(3.8, 0.7 * pivot.shape[0])))
+    image = ax.imshow(pivot.to_numpy(dtype=float), cmap="BrBG", vmin=-2.0, vmax=2.0)
+    ax.set_title("How Each Agent Changes Performance vs Terminus by Model")
+    ax.set_xticks(np.arange(pivot.shape[1]))
+    ax.set_xticklabels(pivot.columns, rotation=55, ha="right")
+    ax.set_yticks(np.arange(pivot.shape[0]))
+    ax.set_yticklabels(pivot.index)
+    cbar = fig.colorbar(image, ax=ax, fraction=0.045, pad=0.02)
+    cbar.set_label(DELTA_SCORE_LABEL)
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "terminus_delta_by_model_heatmap.png", dpi=200)
+    plt.close(fig)
+
+
+def save_harbormix_selection_plot(selected_tasks: pd.DataFrame) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    counts = selected_tasks["benchmark"].value_counts().sort_values()
+    axes[0].barh(counts.index, counts.values, color="#9ecae1", edgecolor="white")
+    axes[0].set_title("Selected HaborMix Candidate Tasks by Benchmark")
+    axes[0].set_xlabel("Selected task count")
+    axes[0].set_ylabel("")
+    scatter = axes[1].scatter(
+        selected_tasks["observed_mean"],
+        selected_tasks["strength_correlation"],
+        s=50 + 220 * selected_tasks["observed_std"].fillna(0),
+        c=selected_tasks["mix_selection_score"],
+        cmap="YlGnBu",
+        edgecolor="white",
+        alpha=0.85,
+    )
+    axes[1].set_title("HaborMix Candidate Selection Signals")
+    axes[1].set_xlabel("Observed mean task score (empirical pass-rate scale when bounded)")
+    axes[1].set_ylabel("Correlation with overall agent+model strength")
+    axes[1].grid(color="#dddddd", linewidth=0.8)
+    cbar = fig.colorbar(scatter, ax=axes[1], fraction=0.045, pad=0.02)
+    cbar.set_label("Selection score")
+    fig.tight_layout()
+    fig.savefig(PAPER_FIGURE_DIR / "harbormix_selection_diagnostics.png", dpi=200)
+    plt.close(fig)
+
+
+def benchmark_mini_leaderboard_tables_and_figures(
+    benchmark_result: ImputationResult,
+    clusters: pd.DataFrame,
+    included_benchmarks: list[str],
+) -> tuple[pd.DataFrame, list[str]]:
+    normalized = benchmark_result.normalized.copy()
+    normalized["agent_model"] = normalized["agent"] + " + " + normalized["model"]
+    cluster_map = clusters.set_index("benchmark")["similarity_cluster"].to_dict()
+    rows = []
+    figure_paths = []
+    for cluster_id, group in clusters[clusters["benchmark"].isin(included_benchmarks)].groupby("similarity_cluster"):
+        benchmarks = group["benchmark"].tolist()
+        n = len(benchmarks)
+        fig, axes = plt.subplots(math.ceil(n / 3), 3, figsize=(16, max(4, 3.2 * math.ceil(n / 3))))
+        axes_flat = np.atleast_1d(axes).ravel()
+        for ax, benchmark in zip(axes_flat, benchmarks):
+            leaders = normalized[["agent_model", "model", "agent", benchmark]].sort_values(benchmark, ascending=False).head(6)
+            leaders = leaders.rename(columns={benchmark: "benchmark_relative_score"})
+            for rank, (_, row) in enumerate(leaders.iterrows(), start=1):
+                rows.append(
+                    {
+                        "similarity_cluster": cluster_id,
+                        "benchmark": benchmark,
+                        "rank": rank,
+                        "agent_model": row["agent_model"],
+                        "model": row["model"],
+                        "agent": row["agent"],
+                        "benchmark_relative_score": row["benchmark_relative_score"],
+                    }
+                )
+            ax.barh(leaders["agent_model"][::-1], leaders["benchmark_relative_score"][::-1], color="#9ecae1", edgecolor="white")
+            ax.set_title(benchmark)
+            ax.set_xlabel("Benchmark-relative score")
+            ax.grid(axis="x", color="#dddddd", linewidth=0.8)
+        for ax in axes_flat[n:]:
+            ax.axis("off")
+        fig.suptitle(f"Mini-Leaderboards for Benchmark Similarity Cluster {cluster_id}", y=1.01)
+        fig.tight_layout()
+        filename = f"mini_leaderboards_cluster_{cluster_id}.png"
+        fig.savefig(PAPER_FIGURE_DIR / filename, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        figure_paths.append(filename)
+    return pd.DataFrame(rows), figure_paths
+
+
 def run_refined_studies(
     raw_benchmark: pd.DataFrame,
     raw_task: pd.DataFrame,
@@ -1048,13 +1414,33 @@ def run_refined_studies(
     variance_filtered = filtered_variance_decomposition(long_df, included_benchmarks)
     corr_filtered, corr_pairs_filtered = pairwise_correlations(benchmark_result.normalized, included_benchmarks)
     uniqueness = predictability_for_cols(benchmark_result.normalized, included_benchmarks)
+    benchmark_role = benchmark_model_agent_role_by_benchmark(long_df, included_benchmarks)
+    benchmark_clusters, benchmark_corr_ordered, _benchmark_cluster_order = benchmark_similarity_clusters(corr_filtered)
     pca_loadings, pca_agent_model_scores, pca_explained = pca_for_cols(benchmark_result.normalized, included_benchmarks)
     agent_lift_summary, agent_lift_by_benchmark = summarize_agent_lift(
         tables["agent_differential_by_benchmark"], included_benchmarks
     )
+    terminus_by_model = terminus_delta_by_model(tables["agent_differential_by_benchmark"], included_benchmarks)
 
     tasks_enriched, task_summary, selected_tasks, frontier_tasks = task_reliability_tables(tables["task_item_stats"])
     alignment = task_aggregate_alignment(benchmark_result, task_result, tasks_enriched, included_benchmarks)
+    task_within_similarity, representative_tasks, task_predictability, task_cross_similarity = task_similarity_and_representatives(
+        task_result, tasks_enriched, benchmark_clusters
+    )
+    selected_task_summary = (
+        selected_tasks.groupby(["benchmark", "difficulty_tier"])
+        .agg(
+            selected_tasks=("task_column", "size"),
+            mean_selection_score=("mix_selection_score", "mean"),
+            mean_observed_score=("observed_mean", "mean"),
+            mean_strength_correlation=("strength_correlation", "mean"),
+        )
+        .reset_index()
+        .sort_values(["selected_tasks", "mean_selection_score"], ascending=False)
+    )
+    mini_leaderboards, mini_leaderboard_figures = benchmark_mini_leaderboard_tables_and_figures(
+        benchmark_result, benchmark_clusters, included_benchmarks
+    )
 
     study_tables = {
         "benchmark_filtering": filter_table,
@@ -1063,17 +1449,27 @@ def run_refined_studies(
         "benchmark_agent_adjusted_effects": agent_effects,
         "benchmark_variance_decomposition_filtered": variance_filtered,
         "benchmark_correlation_filtered": corr_filtered,
+        "benchmark_correlation_clustered": benchmark_corr_ordered,
+        "benchmark_similarity_clusters": benchmark_clusters,
         "benchmark_redundancy_pairs_filtered": corr_pairs_filtered,
         "benchmark_uniqueness_filtered": uniqueness,
+        "benchmark_model_agent_role_by_benchmark": benchmark_role,
         "benchmark_latent_loadings_filtered": pca_loadings,
         "benchmark_latent_agent_model_scores_filtered": pca_agent_model_scores,
         "benchmark_latent_explained_variance_filtered": pca_explained,
         "benchmark_agent_lift_vs_terminus": agent_lift_summary,
         "benchmark_agent_lift_by_benchmark": agent_lift_by_benchmark,
+        "terminus_delta_by_model": terminus_by_model,
+        "benchmark_mini_leaderboards": mini_leaderboards,
         "task_enriched_item_stats": tasks_enriched,
         "task_benchmark_reliable_summary": task_summary,
         "task_to_benchmark_alignment": alignment,
+        "task_within_benchmark_similarity": task_within_similarity,
+        "task_cross_benchmark_similarity": task_cross_similarity,
+        "task_representative_tasks": representative_tasks,
+        "task_predictability_ranked": task_predictability,
         "harbormix_candidate_tasks": selected_tasks,
+        "harbormix_selection_by_benchmark": selected_task_summary,
         "task_frontier_or_saturated_watchlist": frontier_tasks,
     }
 
@@ -1087,12 +1483,22 @@ def run_refined_studies(
         "benchmark_model_adjusted_effects",
         "benchmark_agent_adjusted_effects",
         "benchmark_variance_decomposition_filtered",
+        "benchmark_model_agent_role_by_benchmark",
+        "benchmark_similarity_clusters",
+        "benchmark_correlation_clustered",
         "benchmark_redundancy_pairs_filtered",
         "benchmark_uniqueness_filtered",
         "benchmark_agent_lift_vs_terminus",
+        "terminus_delta_by_model",
+        "benchmark_mini_leaderboards",
         "task_benchmark_reliable_summary",
         "task_to_benchmark_alignment",
+        "task_within_benchmark_similarity",
+        "task_cross_benchmark_similarity",
+        "task_representative_tasks",
+        "task_predictability_ranked",
         "harbormix_candidate_tasks",
+        "harbormix_selection_by_benchmark",
     ]
     for name in paper_tables:
         write_csv(study_tables[name], PAPER_TABLE_DIR / f"{name}.csv")
@@ -1100,11 +1506,19 @@ def run_refined_studies(
     save_paper_agent_model_score_plot(agent_model_scores)
     save_paper_effect_plot(model_effects, "model", "benchmark_model_adjusted_effects.png", "Model Effects Adjusted for Agent and Benchmark")
     save_paper_effect_plot(agent_effects, "agent", "benchmark_agent_adjusted_effects.png", "Agent Effects Adjusted for Model and Benchmark")
+    save_variance_paper_plot(variance_filtered)
+    save_benchmark_role_plot(benchmark_role)
+    save_benchmark_cluster_heatmap(benchmark_corr_ordered)
     save_agent_lift_heatmap(agent_lift_by_benchmark)
+    save_terminus_delta_by_model_plot(terminus_by_model)
     save_benchmark_uniqueness_plot(uniqueness, filter_table)
     save_task_composition_plot(task_summary)
     save_task_alignment_plot(alignment)
-    write_paper_reports(study_tables, benchmark_result, task_result, included_benchmarks)
+    save_task_similarity_heatmap(task_cross_similarity, benchmark_clusters)
+    save_task_predictability_plot(task_predictability)
+    save_representative_task_plot(representative_tasks)
+    save_harbormix_selection_plot(selected_tasks)
+    write_paper_reports(study_tables, benchmark_result, task_result, included_benchmarks, mini_leaderboard_figures)
     return study_tables
 
 
@@ -1112,23 +1526,48 @@ def md_path(path: Path) -> str:
     return str(path.relative_to(ROOT))
 
 
+def report_image(filename: str, alt: str) -> str:
+    return f"![{alt}](../figures/{filename})"
+
+
+def markdown_table(df: pd.DataFrame, columns: list[str], n: int = 8) -> list[str]:
+    if df.empty:
+        return ["No rows."]
+    subset = df.head(n)[columns].copy()
+    for col in subset.columns:
+        subset[col] = subset[col].map(lambda value: f"{value:.3f}" if isinstance(value, float) else str(value))
+    header = "| " + " | ".join(subset.columns) + " |"
+    separator = "| " + " | ".join(["---"] * len(subset.columns)) + " |"
+    rows = ["| " + " | ".join(row) + " |" for row in subset.astype(str).to_numpy()]
+    return [header, separator, *rows]
+
+
 def write_paper_reports(
     study_tables: dict[str, pd.DataFrame],
     benchmark_result: ImputationResult,
     task_result: ImputationResult,
     included_benchmarks: list[str],
+    mini_leaderboard_figures: list[str],
 ) -> None:
     filter_table = study_tables["benchmark_filtering"]
     agent_model_scores = study_tables["benchmark_agent_model_scores"]
     model_effects = study_tables["benchmark_model_adjusted_effects"]
     agent_effects = study_tables["benchmark_agent_adjusted_effects"]
     variance_filtered = study_tables["benchmark_variance_decomposition_filtered"]
+    benchmark_role = study_tables["benchmark_model_agent_role_by_benchmark"]
+    benchmark_clusters = study_tables["benchmark_similarity_clusters"]
     redundancy = study_tables["benchmark_redundancy_pairs_filtered"]
     uniqueness = study_tables["benchmark_uniqueness_filtered"]
     agent_lift = study_tables["benchmark_agent_lift_vs_terminus"]
+    terminus_by_model = study_tables["terminus_delta_by_model"]
     task_summary = study_tables["task_benchmark_reliable_summary"]
     alignment = study_tables["task_to_benchmark_alignment"]
+    task_similarity = study_tables["task_within_benchmark_similarity"]
+    task_cross_similarity = study_tables["task_cross_benchmark_similarity"]
+    representative_tasks = study_tables["task_representative_tasks"]
+    task_predictability = study_tables["task_predictability_ranked"]
     selected_tasks = study_tables["harbormix_candidate_tasks"]
+    selection_by_benchmark = study_tables["harbormix_selection_by_benchmark"]
 
     excluded = filter_table[~filter_table["include_in_paper_analysis"]]
     redundant_high = redundancy[redundancy["spearman"] >= 0.75].sort_values("spearman", ascending=False)
@@ -1137,23 +1576,27 @@ def write_paper_reports(
         alignment["included_in_benchmark_level_paper_filter"] & (alignment["n_reliable_bounded_tasks"] >= 3)
     ].sort_values("spearman_agent_model_correlation", ascending=False)
     task_pool = task_summary.sort_values("candidate_pool_tasks", ascending=False)
+    role_gap = benchmark_role.assign(
+        absolute_role_gap=lambda df: (df["model_partial_r2_over_agent"] - df["agent_partial_r2_over_model"]).abs()
+    ).sort_values("absolute_role_gap", ascending=False)
+    hard_tasks = task_predictability.sort_values("task_unpredictability_score", ascending=False)
+    representative_top = representative_tasks.sort_values("representativeness_score", ascending=False)
 
     report_lines = [
         "# Paper-Facing Cross-Benchmark Analysis",
         "",
-        "This is the curated, paper-facing result index. The bulky matrices and diagnostics are intentionally moved to intermediate directories; the files listed here are the ones to inspect first.",
+        "This report is intended to be read directly. Figures and compact table previews are embedded inline; CSV paths are listed for exact numbers and reproducibility.",
         "",
         "## Directory Contract",
         "",
-        f"- Important paper-facing tables: `{md_path(PAPER_TABLE_DIR)}/`",
-        f"- Important paper-facing figures: `{md_path(PAPER_FIGURE_DIR)}/`",
-        f"- Important paper-facing reports: `{md_path(PAPER_REPORT_DIR)}/`",
-        f"- Study-specific expanded outputs: `{md_path(STUDY_DIR)}/`",
-        f"- Intermediate imputed matrices and diagnostics: `{md_path(PROCESSED_DIR)}/` and `{md_path(INTERMEDIATE_OUTPUT_DIR)}/`",
+        f"- Paper-facing tables: `{md_path(PAPER_TABLE_DIR)}/`",
+        f"- Paper-facing figures: `{md_path(PAPER_FIGURE_DIR)}/`",
+        f"- Expanded study outputs: `{md_path(STUDY_DIR)}/`",
+        f"- Intermediate imputed matrices and diagnostics: `{md_path(PROCESSED_DIR)}/`",
         "",
-        "## Study 1: Benchmark-Level Coverage and Filtering",
+        "## Study 1: Coverage Filtering",
         "",
-        "**Method:** I first filter benchmark-level columns by observed coverage. A benchmark is included in paper-facing benchmark-level analyses when it has at least 15 observed agent+model rows and at most 45% missingness. This avoids building the paper story on columns where matrix completion is doing most of the work.",
+        "**Method:** Benchmark-level claims use only columns with at least 15 observed agent+model rows and at most 45% missingness. This avoids building the story on columns where matrix completion dominates the signal.",
         "",
         "**Code files:**",
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
@@ -1162,121 +1605,187 @@ def write_paper_reports(
         f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_filtering.csv')}`",
         "",
         "**Result overview and analysis:**",
-        f"- Included {len(included_benchmarks)} of {len(filter_table)} benchmarks in the paper-facing benchmark-level analyses.",
-        f"- Excluded sparse benchmarks: {', '.join(excluded['benchmark'].head(12).tolist())}.",
-        f"- Benchmark matrix imputation used rank {benchmark_result.best_rank}; raw missing fraction was {benchmark_result.missing_fraction:.3f}.",
+        f"- Included {len(included_benchmarks)} of {len(filter_table)} benchmarks.",
+        f"- Excluded sparse benchmarks: {', '.join(excluded['benchmark'].tolist())}.",
+        f"- Benchmark matrix imputation used rank {benchmark_result.best_rank}; raw benchmark missing fraction was {benchmark_result.missing_fraction:.3f}.",
         "",
-        "**Insight and findings:**",
-        "- Treat `ds-1000`, `financeagent`, `hle`, `skillsbench`, `quixbugs`, and similarly sparse columns as provisional until more runs land. They can be shown in appendix diagnostics, but they should not anchor the core benchmark-level story yet.",
+        *markdown_table(filter_table, ["benchmark", "include_in_paper_analysis", "observed_count", "missing_fraction"], 12),
         "",
-        "## Study 2: Separate Model and Agent Effects",
+        "**Insight and findings:** Sparse columns should stay in appendix/provisional analysis until more experiments land. The main paper story should use the coverage-filtered benchmark set.",
         "",
-        "**Method:** I treat `model` and `agent` as separate fixed-effect dimensions. For model effects, I residualize out agent and benchmark effects; for agent effects, I residualize out model and benchmark effects. I also keep an `agent+model` ranking as a descriptive table, but it is not the primary causal interpretation.",
+        "## Study 2: Model vs Agent Roles",
         "",
-        "**Code files:**",
-        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
-        "",
-        "**Result paths:**",
-        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_agent_model_scores.csv')}`",
-        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_model_adjusted_effects.csv')}`",
-        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_agent_adjusted_effects.csv')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'benchmark_agent_model_top_scores.png')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'benchmark_model_adjusted_effects.png')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'benchmark_agent_adjusted_effects.png')}`",
-        "",
-        "**Result overview and analysis:**",
-        *top_records(agent_model_scores, ["rank", "agent_model", "mean_normalized_score", "observed_fraction_on_included_benchmarks"], 8),
-        "",
-        "**Insight and findings:**",
-        f"- Top adjusted models: {', '.join(model_effects['model'].head(5).tolist())}.",
-        f"- Top adjusted agents: {', '.join(agent_effects['agent'].head(4).tolist())}.",
-        "- The agent main effect remains much smaller than model-by-benchmark interaction. This supports a paper story where agents are not global multipliers; they are benchmark- and model-dependent adapters.",
-        "",
-        "## Study 3: Variance, Redundancy, and Benchmark Uniqueness",
-        "",
-        "**Method:** I use fixed-effect variance attribution to estimate how much normalized-score structure is explained by model, agent, benchmark, and interactions. I then compute Spearman benchmark correlations and ridge leave-fold-out predictability to identify redundant and unique benchmarks.",
+        "**Method:** I fit fixed-effect regressions in two views. The overall view decomposes benchmark-relative score into model, agent, benchmark, and interaction terms. The per-benchmark view fits each benchmark separately and compares partial R2 from model after controlling for agent against partial R2 from agent after controlling for model.",
         "",
         "**Code files:**",
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
         "",
         "**Result paths:**",
         f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_variance_decomposition_filtered.csv')}`",
-        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_redundancy_pairs_filtered.csv')}`",
-        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_uniqueness_filtered.csv')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'benchmark_uniqueness_vs_coverage.png')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_model_agent_role_by_benchmark.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_model_adjusted_effects.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_agent_adjusted_effects.csv')}`",
+        "",
+        report_image("benchmark_variance_attribution.png", "Benchmark-level variance attribution"),
+        "",
+        report_image("benchmark_model_vs_agent_role.png", "Per-benchmark model vs agent explanatory power"),
+        "",
+        report_image("benchmark_model_adjusted_effects.png", "Model effects adjusted for agent and benchmark"),
+        "",
+        report_image("benchmark_agent_adjusted_effects.png", "Agent effects adjusted for model and benchmark"),
         "",
         "**Result overview and analysis:**",
-        *top_records(variance_filtered, ["component", "partial_r2_over_other_main_effects", "r2", "type"], 7),
+        *markdown_table(variance_filtered, ["component", "partial_r2_over_other_main_effects", "r2", "type"], 7),
         "",
-        "High-correlation benchmark pairs:",
-        *top_records(redundant_high, ["left", "right", "spearman"], 8),
+        "Benchmarks with the largest model-vs-agent role imbalance:",
+        *markdown_table(role_gap, ["benchmark", "model_partial_r2_over_agent", "agent_partial_r2_over_model", "dominant_dimension"], 10),
         "",
-        "Least predictable included benchmarks:",
-        *top_records(unique_low, ["benchmark", "cv_r2_from_other_included_benchmarks", "cv_rmse"], 8),
+        "**Insight and findings:** Model identity explains much more overall variation than agent identity, but the role varies by benchmark. Agent effects are more useful as benchmark-specific harnessing effects than as a universal main effect.",
         "",
-        "**Insight and findings:**",
-        "- The dominant signal is interactional: model performance changes substantially across benchmarks. This argues for cross-benchmark analysis rather than a single aggregate leaderboard.",
-        "- Highly correlated benchmarks are candidates for compression in a benchmark mix, while low-predictability benchmarks should be preserved if the goal is broad behavioral coverage.",
+        "## Study 3: Agent+Model Leaderboards",
         "",
-        "## Study 4: Paired Agent Lift Against terminus-2",
+        "**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Benchmarks are clustered by score-profile similarity, then each cluster gets a small-multiple leaderboard figure so similar benchmarks can be read together.",
         "",
-        "**Method:** For every model that has both `terminus-2` and another agent row, I compute paired benchmark deltas in normalized space. This isolates the agent change while holding the model fixed.",
+        "**Code files:**",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
+        "",
+        "**Result paths:**",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_agent_model_scores.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_mini_leaderboards.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_similarity_clusters.csv')}`",
+        f"- `{md_path(PAPER_FIGURE_DIR / 'mini_leaderboards_cluster_*.png')}`",
+        "",
+        report_image("benchmark_agent_model_top_scores.png", "Top agent+model pairs on included benchmarks"),
+        "",
+        *[report_image(fig, f"Mini-leaderboards {fig}") for fig in mini_leaderboard_figures],
+        "",
+        "**Result overview and analysis:**",
+        *markdown_table(agent_model_scores, ["rank", "agent_model", "mean_benchmark_relative_score", "observed_fraction_on_included_benchmarks"], 10),
+        "",
+        "**Insight and findings:** The leaderboard is useful descriptively, but not sufficient for causal agent claims because model and agent are entangled in the row identity.",
+        "",
+        "## Study 4: Benchmark Predictability and Similarity",
+        "",
+        "**Method:** Following the BenchPress idea, each included benchmark is predicted from the other included benchmarks using ridge regression with cross-validation over agent+model rows. Low or negative R2 means the benchmark is hard to reconstruct from the rest and likely contributes distinct information. Benchmark similarity uses Spearman correlation of agent+model score profiles and hierarchical clustering.",
+        "",
+        "**Code files:**",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
+        "",
+        "**Result paths:**",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_uniqueness_filtered.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_redundancy_pairs_filtered.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_correlation_clustered.csv')}`",
+        "",
+        report_image("benchmark_uniqueness_vs_coverage.png", "Benchmark uniqueness after coverage filtering"),
+        "",
+        report_image("benchmark_similarity_clustered_heatmap.png", "Clustered benchmark similarity heatmap"),
+        "",
+        "**Result overview and analysis:**",
+        "Hardest-to-predict benchmarks:",
+        *markdown_table(unique_low, ["benchmark", "cv_r2_from_other_included_benchmarks", "cv_rmse"], 10),
+        "",
+        "Most similar benchmark pairs:",
+        *markdown_table(redundant_high, ["left", "right", "spearman"], 10),
+        "",
+        "**Insight and findings:** Predictable benchmarks are candidates for compression; hard-to-predict benchmarks should be preserved when the goal is behavioral breadth. Similarity clusters are also the basis for the grouped mini-leaderboards.",
+        "",
+        "## Study 5: Task Similarity, Predictability, and Representatives",
+        "",
+        "**Method:** Task-level analysis uses reliable, bounded, non-degenerate tasks only. A task is hard to predict when its maximum absolute Spearman correlation to peer tasks in the same benchmark is low. A representative task is one whose score profile correlates strongly with the benchmark's reliable-task aggregate. Within- and cross-benchmark task similarity use median absolute task-profile correlations.",
+        "",
+        "**Code files:**",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
+        "",
+        "**Result paths:**",
+        f"- `{md_path(PAPER_TABLE_DIR / 'task_predictability_ranked.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'task_representative_tasks.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'task_within_benchmark_similarity.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'task_cross_benchmark_similarity.csv')}`",
+        "",
+        report_image("task_hard_to_predict_ranked.png", "Hard-to-predict reliable tasks"),
+        "",
+        report_image("task_best_representatives.png", "Best representative task per benchmark"),
+        "",
+        report_image("task_similarity_benchmark_pair_heatmap.png", "Task similarity across benchmark pairs"),
+        "",
+        "**Result overview and analysis:**",
+        "Hardest-to-predict reliable tasks:",
+        *markdown_table(hard_tasks, ["benchmark", "task_id", "task_unpredictability_score", "difficulty_tier", "observed_mean"], 12),
+        "",
+        "Most representative tasks:",
+        *markdown_table(representative_top, ["benchmark", "task_id", "representativeness_score", "difficulty_tier", "observed_mean"], 12),
+        "",
+        "Benchmarks with strongest within-benchmark task similarity:",
+        *markdown_table(task_similarity, ["benchmark", "n_reliable_tasks", "median_abs_task_similarity_within_benchmark"], 10),
+        "",
+        "**Insight and findings:** Task predictability and representativeness are different objectives. Representative tasks are good compact proxies for a benchmark; hard-to-predict tasks are better stress tests for broad coverage.",
+        "",
+        "## Study 6: Terminus Harnessing Effects",
+        "",
+        "**Method:** Terminus is treated as the fair baseline across models. For every model with both `terminus-2` and another agent row, I compute paired benchmark-relative score deltas while holding the model fixed.",
         "",
         "**Code files:**",
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
         "",
         "**Result paths:**",
         f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_agent_lift_vs_terminus.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'terminus_delta_by_model.csv')}`",
         f"- `{md_path(BENCHMARK_STUDY_DIR / 'benchmark_agent_lift_by_benchmark.csv')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'benchmark_agent_lift_heatmap.png')}`",
+        "",
+        report_image("benchmark_agent_lift_heatmap.png", "Agent lift vs terminus by benchmark"),
+        "",
+        report_image("terminus_delta_by_model_heatmap.png", "Agent lift vs terminus by model"),
         "",
         "**Result overview and analysis:**",
-        *top_records(agent_lift, ["agent", "mean_delta_vs_terminus", "win_rate_vs_terminus", "compared_models"], 6),
+        *markdown_table(agent_lift, ["agent", "mean_delta_vs_terminus", "win_rate_vs_terminus", "compared_models"], 6),
         "",
-        "**Insight and findings:**",
-        "- This is the cleanest agent-vs-agent evidence currently available because it compares agents within the same model. Use this for claims about agent scaffolding rather than raw `agent+model` rankings.",
+        *markdown_table(terminus_by_model, ["model", "agent", "mean_delta_vs_terminus", "win_rate_vs_terminus"], 12),
         "",
-        "## Study 5: Task-Level Difficulty, Discrimination, and Mix Candidates",
+        "**Insight and findings:** Paired deltas are the best current evidence for whether an agent harness improves over Terminus. The deltas vary by model and benchmark, so claims should avoid saying one harness universally dominates.",
         "",
-        "**Method:** Task-level analysis uses a different lens: items are filtered by observed coverage, bounded score behavior, observed variance, and positive correlation with overall agent+model strength. The candidate mix favors hard/medium/easy tasks that discriminate among current agents, while frontier and saturated tasks are placed in a watchlist instead of the main mix.",
+        "## Study 7: HaborMix Selection",
+        "",
+        "**Method:** Candidate tasks must be reliable, bounded, discriminative, and non-degenerate. The selection score rewards positive correlation with overall agent+model strength, observed variance, moderate difficulty, and observation count. I cap selection at 6 tasks per benchmark to avoid overrepresenting large benchmarks.",
         "",
         "**Code files:**",
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
         "",
         "**Result paths:**",
-        f"- `{md_path(PAPER_TABLE_DIR / 'task_benchmark_reliable_summary.csv')}`",
         f"- `{md_path(PAPER_TABLE_DIR / 'harbormix_candidate_tasks.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'harbormix_selection_by_benchmark.csv')}`",
         f"- `{md_path(TASK_STUDY_DIR / 'task_frontier_or_saturated_watchlist.csv')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'task_reliable_difficulty_composition.png')}`",
+        "",
+        report_image("harbormix_selection_diagnostics.png", "HaborMix selection diagnostics"),
+        "",
+        report_image("task_reliable_difficulty_composition.png", "Reliable bounded task difficulty composition"),
         "",
         "**Result overview and analysis:**",
-        *top_records(task_pool, ["benchmark", "n_tasks", "candidate_pool_tasks", "mean_strength_correlation"], 10),
-        f"- Selected {len(selected_tasks)} diversified HaborMix candidate tasks with a cap of 6 per benchmark.",
+        *markdown_table(selection_by_benchmark, ["benchmark", "difficulty_tier", "selected_tasks", "mean_selection_score"], 14),
         "",
-        "**Insight and findings:**",
-        "- The task-level table is more useful for mix construction than benchmark-level averages because it exposes saturated, frontier, and discriminative tasks separately.",
-        "- Benchmarks with many tasks but few reliable discriminative items should not dominate a compact mix simply because they are large.",
+        f"- Selected {len(selected_tasks)} diversified candidate tasks.",
         "",
-        "## Study 6: Task Aggregate vs Benchmark-Level Score Alignment",
+        "**Insight and findings:** HaborMix selection is quantitative and auditable: it balances discriminativeness, difficulty, coverage, and benchmark diversity rather than taking the largest benchmarks wholesale.",
         "",
-        "**Method:** For each benchmark, I average normalized task scores and correlate that aggregate with the benchmark-level normalized score across agent+model rows. This checks whether the task matrix and benchmark matrix tell the same story.",
+        "## Study 8: Task Aggregate vs Benchmark-Level Score Alignment",
+        "",
+        "**Method:** For each benchmark, I average benchmark-relative task scores and correlate that aggregate with the benchmark-level benchmark-relative score across agent+model rows.",
         "",
         "**Code files:**",
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
         "",
         "**Result paths:**",
         f"- `{md_path(PAPER_TABLE_DIR / 'task_to_benchmark_alignment.csv')}`",
-        f"- `{md_path(PAPER_FIGURE_DIR / 'task_to_benchmark_alignment.png')}`",
+        "",
+        report_image("task_to_benchmark_alignment.png", "Task aggregate vs benchmark score alignment"),
         "",
         "**Result overview and analysis:**",
-        *top_records(alignment_good, ["benchmark", "n_reliable_bounded_tasks", "spearman_agent_model_correlation"], 10),
+        *markdown_table(alignment_good, ["benchmark", "n_reliable_bounded_tasks", "spearman_agent_model_correlation"], 12),
         "",
-        "**Insight and findings:**",
-        "- Strong alignment means the task matrix can explain the benchmark-level score; weak alignment flags benchmarks where the aggregation rule or metric scale needs closer inspection before paper claims.",
+        "**Insight and findings:** Strong alignment means the task matrix explains the benchmark-level score; weak alignment flags benchmarks whose aggregation rule or metric scale needs closer inspection.",
         "",
         "## Cross-Study Story",
         "",
-        "The first pass suggests three paper-relevant claims. First, coverage filtering is mandatory: several raw benchmark columns are too sparse to support benchmark-level conclusions. Second, after filtering, the most interesting structure is not a single leaderboard but model-benchmark and agent-benchmark interaction. Agent scaffolds should be discussed through paired within-model deltas, not just raw agent+model ranks. Third, task-level analysis is the right layer for HaborMix construction: reliable, bounded, discriminative tasks form a compact candidate pool, while frontier/saturated tasks are better treated as separate stress-test or monitoring sets.",
+        "The emerging story is that benchmark diversity matters more than a single aggregate leaderboard. Coverage filtering removes sparse columns from the main benchmark-level claims. Within the retained benchmarks, model identity is usually more explanatory than agent identity, but agent effects vary sharply by model and benchmark. BenchPress-style predictability analysis finds benchmarks that are redundant enough to compress and benchmarks that add distinct signal. The task-level layer then answers a different question: which items are representative, which are hard to predict, and which form a balanced HaborMix candidate set. Terminus paired deltas are the fairest current way to talk about harness improvement.",
         "",
         "## Not Completed Yet",
         "",
@@ -1291,11 +1800,12 @@ def write_paper_reports(
         "# Key Findings for Paper Drafting",
         "",
         f"1. Use {len(included_benchmarks)} coverage-filtered benchmarks for benchmark-level claims; keep sparse benchmarks in appendix/provisional analysis.",
-        "2. Separate model and agent dimensions. The useful agent evidence is paired lift over `terminus-2` for the same model, not an unqualified agent+model leaderboard.",
-        "3. Model-by-benchmark interaction is the strongest benchmark-level signal, so benchmark diversity matters.",
-        "4. Redundant benchmarks can be considered for compression; least-predictable benchmarks should be preserved for behavioral breadth.",
-        f"5. The current task-level filter yields {len(selected_tasks)} diversified candidate tasks for HaborMix-style selection.",
-        "6. Task-to-benchmark alignment should be used as a sanity check before interpreting benchmark-level scores from task-level tables.",
+        "2. Model identity is the larger overall factor, but the model-vs-agent balance varies by benchmark; use the per-benchmark role plot for qualified claims.",
+        "3. Separate model and agent dimensions. The useful agent evidence is paired lift over `terminus-2` for the same model, not an unqualified agent+model leaderboard.",
+        "4. BenchPress-style predictability applies here: redundant benchmarks can be compressed; least-predictable benchmarks should be preserved for behavioral breadth.",
+        "5. Task predictability and task representativeness are distinct: hard-to-predict tasks are stress tests, while representative tasks are compact proxies for a benchmark.",
+        f"6. The current task-level filter yields {len(selected_tasks)} diversified candidate tasks for HaborMix-style selection.",
+        "7. Task-to-benchmark alignment should be used as a sanity check before interpreting benchmark-level scores from task-level tables.",
         "",
         "Primary reference file: `output/paper/reports/analysis_story.md`.",
     ]
@@ -1317,213 +1827,6 @@ def set_plot_style() -> None:
             "savefig.facecolor": "white",
         }
     )
-
-
-def save_missingness_plot(stats: pd.DataFrame) -> None:
-    plot_df = stats.sort_values("missing_fraction", ascending=True)
-    fig, ax = plt.subplots(figsize=(10, 12))
-    ax.barh(plot_df["column"], plot_df["missing_fraction"], color="#9ecae1", edgecolor="#f7fbff")
-    ax.set_title("Benchmark Missingness")
-    ax.set_xlabel("Missing fraction")
-    ax.set_ylabel("")
-    ax.set_xlim(0, 1)
-    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
-    fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "benchmark_missingness.png", dpi=180)
-    plt.close(fig)
-
-
-def save_system_plot(system_df: pd.DataFrame) -> None:
-    plot_df = system_df.sort_values("normalized_mean")
-    labels = plot_df["model"] + " / " + plot_df["agent"]
-    fig, ax = plt.subplots(figsize=(12, 9))
-    ax.barh(labels, plot_df["normalized_mean"], color="#a1d99b", edgecolor="#f7fcf5")
-    ax.set_title("System Ranking by Imputed Normalized Benchmark Mean")
-    ax.set_xlabel("Mean normalized score")
-    ax.set_ylabel("")
-    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
-    fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "system_rankings.png", dpi=180)
-    plt.close(fig)
-
-
-def save_variance_plot(variance_df: pd.DataFrame) -> None:
-    plot_df = variance_df[variance_df["component"] != "all_main_effects"].copy()
-    plot_df = plot_df.sort_values("partial_r2_over_other_main_effects")
-    fig, ax = plt.subplots(figsize=(10, 5.8))
-    ax.barh(
-        plot_df["component"],
-        plot_df["partial_r2_over_other_main_effects"],
-        color="#bcbddc",
-        edgecolor="#f7f7ff",
-    )
-    ax.set_title("Variance Attribution")
-    ax.set_xlabel("Partial R2 over other main effects")
-    ax.set_ylabel("")
-    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
-    fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "variance_attribution.png", dpi=180)
-    plt.close(fig)
-
-
-def save_correlation_plot(corr: pd.DataFrame) -> None:
-    matrix = corr.set_index("benchmark")
-    fig, ax = plt.subplots(figsize=(15, 13))
-    image = ax.imshow(matrix.to_numpy(dtype=float), cmap="RdBu_r", vmin=-1, vmax=1)
-    ax.set_title("Benchmark Spearman Correlation")
-    ax.set_xticks(np.arange(matrix.shape[1]))
-    ax.set_xticklabels(matrix.columns, rotation=90)
-    ax.set_yticks(np.arange(matrix.shape[0]))
-    ax.set_yticklabels(matrix.index)
-    cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
-    cbar.set_label("Spearman rho")
-    fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "benchmark_correlation_heatmap.png", dpi=180)
-    plt.close(fig)
-
-
-def save_tier_plot(task_summary: pd.DataFrame) -> None:
-    tier_cols = ["frontier", "hard", "medium", "easy", "saturated", "unbounded_or_penalty"]
-    plot_df = task_summary.sort_values("n_tasks", ascending=False).head(30).set_index("benchmark")
-    colors = ["#c7e9c0", "#a1d99b", "#9ecae1", "#fdd0a2", "#fdae6b", "#dadaeb"]
-    fig, ax = plt.subplots(figsize=(13, 8))
-    bottom = np.zeros(plot_df.shape[0])
-    for col, color in zip(tier_cols, colors):
-        values = plot_df[col].to_numpy(dtype=float)
-        ax.bar(plot_df.index, values, bottom=bottom, label=col, color=color, edgecolor="white")
-        bottom += values
-    ax.set_title("Task Difficulty Tiers by Benchmark")
-    ax.set_ylabel("Task count")
-    ax.set_xlabel("")
-    ax.tick_params(axis="x", rotation=75)
-    ax.legend(ncols=3, frameon=False)
-    fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "task_difficulty_tiers_top30.png", dpi=180)
-    plt.close(fig)
-
-
-def save_svd_cv_plot(benchmark_result: ImputationResult, task_result: ImputationResult) -> None:
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    ax.plot(benchmark_result.cv["rank"], benchmark_result.cv["rmse"], marker="o", color="#74a9cf", label="benchmark")
-    ax.plot(task_result.cv["rank"], task_result.cv["rmse"], marker="o", color="#c994c7", label="task")
-    ax.set_title("SVD Imputation Rank Cross-Validation")
-    ax.set_xlabel("Rank")
-    ax.set_ylabel("Holdout RMSE in normalized space")
-    ax.grid(color="#dddddd", linewidth=0.8)
-    ax.legend(frameon=False)
-    fig.tight_layout()
-    fig.savefig(FIGURE_DIR / "svd_rank_cv.png", dpi=180)
-    plt.close(fig)
-
-
-def save_figures(
-    benchmark_result: ImputationResult,
-    task_result: ImputationResult,
-    tables: dict[str, pd.DataFrame],
-) -> None:
-    set_plot_style()
-    save_missingness_plot(benchmark_result.stats)
-    save_system_plot(tables["system_scores"])
-    save_variance_plot(tables["variance_decomposition"])
-    save_correlation_plot(tables["benchmark_correlations"])
-    save_tier_plot(tables["task_benchmark_summary"])
-    save_svd_cv_plot(benchmark_result, task_result)
-
-
-def top_records(df: pd.DataFrame, columns: list[str], n: int = 8) -> list[str]:
-    lines = []
-    for record in df.head(n)[columns].to_dict("records"):
-        parts = []
-        for col in columns:
-            value = record[col]
-            if isinstance(value, float):
-                parts.append(f"{col}={value:.3f}")
-            else:
-                parts.append(f"{col}={value}")
-        lines.append("- " + ", ".join(parts))
-    return lines
-
-
-def write_report(
-    benchmark_result: ImputationResult,
-    task_result: ImputationResult,
-    tables: dict[str, pd.DataFrame],
-) -> None:
-    system_df = tables["system_scores"]
-    variance_df = tables["variance_decomposition"]
-    corr_pairs = tables["benchmark_redundancy_pairs"]
-    predictability = tables["benchmark_predictability"]
-    task_summary = tables["task_benchmark_summary"]
-    agent_diff = tables["agent_differential_by_benchmark"]
-    agent_summary = (
-        agent_diff.groupby(["agent", "benchmark"])["delta_normalized"].mean().reset_index().sort_values("delta_normalized", ascending=False)
-        if not agent_diff.empty
-        else pd.DataFrame(columns=["agent", "benchmark", "delta_normalized"])
-    )
-
-    high_redundancy = corr_pairs[corr_pairs["spearman"] > 0.85].sort_values("spearman", ascending=False)
-    negative_pairs = corr_pairs.sort_values("spearman", ascending=True)
-    unique_benchmarks = predictability.sort_values("cv_r2")
-    missing_benchmarks = benchmark_result.stats.sort_values("missing_fraction", ascending=False)
-    frontier_counts = task_summary.sort_values("frontier", ascending=False)
-
-    lines = [
-        "# Cross-Benchmark Analysis Summary",
-        "",
-        "## Scope",
-        "",
-        "This run uses the two currently available raw score matrices: `benchmark_level_matrix.csv` and `task_level_matrix.csv`. The pipeline treats rows as `(model, agent)` systems, benchmark columns as benchmark-level scores, and task columns as `benchmark/task_id` scores.",
-        "",
-        "The current data does not include repeated trials, trajectories, token counts, wall time, or run-level error labels, so the pipeline implements the matrix analyses now and records the trial/trajectory phases as pending.",
-        "",
-        "## Imputation",
-        "",
-        f"- Benchmark matrix: {benchmark_result.raw.shape[0]} systems x {benchmark_result.raw.shape[1] - 2} benchmarks, raw missing fraction {benchmark_result.missing_fraction:.3f}, selected SVD rank {benchmark_result.best_rank}.",
-        f"- Task matrix: {task_result.raw.shape[0]} systems x {task_result.raw.shape[1] - 2} tasks, raw missing fraction {task_result.missing_fraction:.3f}, selected SVD rank {task_result.best_rank}.",
-        "- Imputation is performed after `log1p` transforms for nonnegative unbounded columns and robust per-column centering/scaling; observed values are written back exactly; imputed raw values are inverse-transformed and clipped to each column's observed min/max.",
-        "",
-        "## Top Systems",
-        "",
-        *top_records(system_df, ["rank", "model", "agent", "normalized_mean", "observed_fraction"], 10),
-        "",
-        "## Variance Attribution",
-        "",
-        *top_records(variance_df, ["component", "partial_r2_over_other_main_effects", "r2", "type"], 8),
-        "",
-        "## Redundant Benchmark Pairs",
-        "",
-        *top_records(high_redundancy, ["left", "right", "spearman"], 12),
-        "",
-        "## Most Anti-Correlated or Divergent Pairs",
-        "",
-        *top_records(negative_pairs, ["left", "right", "spearman"], 8),
-        "",
-        "## Least Predictable Benchmarks",
-        "",
-        *top_records(unique_benchmarks, ["benchmark", "cv_r2", "cv_rmse"], 12),
-        "",
-        "## Most Incomplete Benchmarks",
-        "",
-        *top_records(missing_benchmarks, ["column", "missing_fraction", "observed_count"], 12),
-        "",
-        "## Task-Level Frontier Candidates",
-        "",
-        *top_records(frontier_counts, ["benchmark", "n_tasks", "frontier", "hard", "mean_missing_fraction"], 12),
-        "",
-        "## Strongest Agent Differentials vs terminus-2",
-        "",
-        *top_records(agent_summary, ["agent", "benchmark", "delta_normalized"], 12),
-        "",
-        "## Pending Analyses",
-        "",
-        "- Trial consistency, pass@k, reliability profiles, and efficiency metrics need per-trial run data.",
-        "- LLM trajectory failure taxonomy, bottleneck CDFs, and step-level error distributions need trajectories and run metadata.",
-        "- Full IRT/DIF is deferred until repeated binary response data is available. The current task table includes item difficulty tiers and strength-correlation proxies as a preparatory layer.",
-        "- Scaling/provider analysis needs provider metadata such as parameter count, release date, and model family labels.",
-        "",
-    ]
-    (REPORT_DIR / "analysis_summary.md").write_text("\n".join(lines))
-
 
 def run_pipeline() -> None:
     prepare_output_dirs()
@@ -1549,8 +1852,6 @@ def run_pipeline() -> None:
     write_matrix_outputs("task", task_result)
     tables = write_tables(raw_benchmark, raw_task, benchmark_result, task_result)
     run_refined_studies(raw_benchmark, raw_task, benchmark_result, task_result, tables)
-    save_figures(benchmark_result, task_result, tables)
-    write_report(benchmark_result, task_result, tables)
 
 
 def main() -> None:

@@ -9,7 +9,6 @@ This repository contains a `uv`-run analysis pipeline for cross-benchmark agent 
 - Intermediate processed data lives under `data/processed/intermediate/`.
 - Expanded study outputs live under `output/studies/`.
 - Important paper-facing tables, figures, and reports live under `output/paper/`.
-- Generic diagnostic reports and visuals live under `output/intermediate/`.
 - The pipeline cleans only its generated output directories before each run.
 
 ## Data Assumptions
