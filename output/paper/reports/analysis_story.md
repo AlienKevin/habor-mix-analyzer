@@ -9,11 +9,29 @@ This report is intended to be read directly. Figures and compact table previews 
 - Expanded study outputs: `output/studies/`
 - Intermediate imputed matrices and diagnostics: `data/processed/intermediate/`
 
+Missingness in this report means original raw-data coverage before SVD filling. The processed SVD matrices are dense; observed-count and missingness columns are retained so we can distinguish measured evidence from model-completed cells.
+
+Data provenance for the main studies:
+
+| analysis | primary_matrix | processed_output |
+| --- | --- | --- |
+| coverage filtering | raw benchmark matrix metadata | data/processed/intermediate/benchmark_column_quality.csv |
+| agent+model aggregate leaderboard | SVD-filled raw benchmark matrix | data/processed/intermediate/benchmark_svd_imputed_matrix.csv |
+| per-benchmark mini-leaderboards | SVD-filled raw benchmark matrix | data/processed/intermediate/benchmark_svd_imputed_matrix.csv |
+| model vs agent roles | SVD-filled benchmark-relative matrix | data/processed/intermediate/benchmark_svd_imputed_normalized_matrix.csv |
+| benchmark predictability and similarity | SVD-filled benchmark-relative matrix | data/processed/intermediate/benchmark_svd_imputed_normalized_matrix.csv |
+| terminus harness deltas | SVD-filled benchmark-relative matrix | data/processed/intermediate/benchmark_svd_imputed_normalized_matrix.csv |
+| task similarity and representatives | SVD-filled task benchmark-relative matrix plus task quality metadata | data/processed/intermediate/task_svd_imputed_normalized_matrix.csv |
+| HaborMix candidate selection | processed task item statistics | data/processed/intermediate/task_item_stats.csv |
+
 ## Study 1: Coverage Filtering
 
-**Method:** Benchmark-level claims use only columns with at least 15 observed agent+model rows and at most 45% missingness. This avoids building the story on columns where matrix completion dominates the signal.
+**Method:** Benchmark-level claims use only columns with at least 15 observed agent+model rows and at most 45% original raw-data missingness. The SVD-filled processed matrix is dense, but this filter keeps the paper story from leaning too heavily on filled values.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
@@ -46,6 +64,9 @@ This report is intended to be read directly. Figures and compact table previews 
 **Method:** I fit fixed-effect regressions in two views. The overall view decomposes benchmark-relative score into model, agent, benchmark, and interaction terms. The per-benchmark view fits each benchmark separately and compares partial R2 from model after controlling for agent against partial R2 from agent after controlling for model.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
@@ -91,13 +112,17 @@ Benchmarks with the largest model-vs-agent role imbalance:
 
 ## Study 3: Agent+Model Leaderboards
 
-**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Benchmarks are clustered by score-profile similarity, then each cluster gets a small-multiple leaderboard figure so similar benchmarks can be read together.
+**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Per-benchmark mini-leaderboards use SVD-filled raw benchmark scores on each benchmark's original metric scale. The aggregate top-agent plot uses mean within-benchmark raw-score percentile, because averaging raw scores across benchmarks with different scales would be misleading.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
 - `output/paper/tables/benchmark_agent_model_scores.csv`
+- `output/paper/tables/benchmark_raw_scores_long.csv`
 - `output/paper/tables/benchmark_mini_leaderboards.csv`
 - `output/paper/tables/benchmark_similarity_clusters.csv`
 - `output/paper/figures/mini_leaderboards_cluster_*.png`
@@ -112,26 +137,29 @@ Benchmarks with the largest model-vs-agent role imbalance:
 ![Mini-leaderboards mini_leaderboards_cluster_6.png](../figures/mini_leaderboards_cluster_6.png)
 
 **Result overview and analysis:**
-| rank | agent_model | mean_benchmark_relative_score | observed_fraction_on_included_benchmarks |
+| rank | agent_model | mean_raw_score_percentile_across_benchmarks | observed_fraction_on_included_benchmarks |
 | --- | --- | --- | --- |
-| 1 | gemini-cli + gemini-3.1-pro-preview | 0.877 | 0.949 |
-| 2 | codex + gpt-5.4 | 0.718 | 1.000 |
-| 3 | terminus-2 + gemini-3.1-pro-preview | 0.701 | 0.974 |
-| 4 | terminus-2 + claude-opus-4-6 | 0.612 | 0.333 |
-| 5 | claude-code + claude-opus-4-6 | 0.469 | 0.308 |
-| 6 | terminus-2 + claude-sonnet-4-6 | 0.219 | 0.333 |
-| 7 | terminus-2 + kimi-k2.5 | 0.194 | 0.949 |
-| 8 | claude-code + claude-sonnet-4-6 | 0.138 | 0.308 |
-| 9 | terminus-2 + gemini-3-flash-preview | 0.107 | 0.949 |
-| 10 | gemini-cli + gemini-3-flash-preview | 0.099 | 0.974 |
+| 1 | gemini-cli + gemini-3.1-pro-preview | 0.788 | 0.949 |
+| 2 | codex + gpt-5.4 | 0.778 | 1.000 |
+| 3 | terminus-2 + gemini-3.1-pro-preview | 0.757 | 0.974 |
+| 4 | terminus-2 + claude-opus-4-6 | 0.669 | 0.333 |
+| 5 | terminus-2 + kimi-k2.5 | 0.622 | 0.949 |
+| 6 | claude-code + claude-opus-4-6 | 0.619 | 0.308 |
+| 7 | terminus-2 + gemini-3-flash-preview | 0.597 | 0.949 |
+| 8 | codex + gpt-5-mini | 0.587 | 0.974 |
+| 9 | terminus-2 + claude-sonnet-4-6 | 0.586 | 0.333 |
+| 10 | gemini-cli + gemini-3-flash-preview | 0.573 | 0.974 |
 
-**Insight and findings:** The leaderboard is useful descriptively, but not sufficient for causal agent claims because model and agent are entangled in the row identity.
+**Insight and findings:** Raw benchmark scores should be read benchmark by benchmark. The percentile aggregate is a compact descriptive ranking only; it is not a causal agent claim because model and agent are entangled in the row identity.
 
 ## Study 4: Benchmark Predictability and Similarity
 
 **Method:** Following the BenchPress idea, each included benchmark is predicted from the other included benchmarks using ridge regression with cross-validation over agent+model rows. Low or negative R2 means the benchmark is hard to reconstruct from the rest and likely contributes distinct information. Benchmark similarity uses Spearman correlation of agent+model score profiles and hierarchical clustering.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
@@ -176,6 +204,9 @@ Most similar benchmark pairs:
 **Method:** Task-level analysis uses reliable, bounded, non-degenerate tasks only. A task is hard to predict when its maximum absolute Spearman correlation to peer tasks in the same benchmark is low. A representative task is one whose score profile correlates strongly with the benchmark's reliable-task aggregate. Within- and cross-benchmark task similarity use median absolute task-profile correlations.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
@@ -244,6 +275,9 @@ Benchmarks with strongest within-benchmark task similarity:
 **Method:** Terminus is treated as the fair baseline across models. For every model with both `terminus-2` and another agent row, I compute paired benchmark-relative score deltas while holding the model fixed.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
@@ -284,6 +318,9 @@ Benchmarks with strongest within-benchmark task similarity:
 **Method:** Candidate tasks must be reliable, bounded, discriminative, and non-degenerate. The selection score rewards positive correlation with overall agent+model strength, observed variance, moderate difficulty, and observation count. I cap selection at 6 tasks per benchmark to avoid overrepresenting large benchmarks.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**
@@ -322,6 +359,9 @@ Benchmarks with strongest within-benchmark task similarity:
 **Method:** For each benchmark, I average benchmark-relative task scores and correlate that aggregate with the benchmark-level benchmark-relative score across agent+model rows.
 
 **Code files:**
+- `src/habor_mix_analyzer/analysis.py`
+- `src/habor_mix_analyzer/figures.py`
+- `src/habor_mix_analyzer/reports.py`
 - `src/habor_mix_analyzer/pipeline.py`
 
 **Result paths:**

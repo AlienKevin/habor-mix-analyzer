@@ -4,13 +4,39 @@ Analysis pipeline for large-scale agent benchmark matrices used in the adapters 
 
 ## Quick Start
 
-Run the current pipeline with `uv`:
+Run the full pipeline with `uv`:
 
 ```bash
 uv run habor-analyze
 ```
 
 The command reads raw matrices from `data/raw/`, writes intermediate processed data under `data/processed/intermediate/`, and writes curated study results under `output/studies/` and `output/paper/`.
+
+The pipeline is also step-based, so you do not need to recompute everything after every edit:
+
+```bash
+uv run habor-analyze impute --clean
+uv run habor-analyze intermediate
+uv run habor-analyze studies --clean
+```
+
+Available steps:
+
+- `impute`: raw matrices -> SVD-filled processed matrices and imputation diagnostics.
+- `intermediate`: processed matrices -> intermediate analysis tables under `data/processed/intermediate/`.
+- `studies`: intermediate tables -> paper/study tables, figures, and reports.
+- `all`: runs `impute`, `intermediate`, and `studies` in dependency order.
+
+Use `--clean` to clean generated outputs for the selected step before running it. Without `--clean`, the command only rewrites the deterministic files produced by that step.
+
+## Code Structure
+
+- `src/habor_mix_analyzer/common.py`: paths, constants, shared I/O, plotting helpers.
+- `src/habor_mix_analyzer/imputation.py`: robust scaling, SVD rank selection, imputation, processed matrix writing.
+- `src/habor_mix_analyzer/analysis.py`: intermediate tables, benchmark/task study tables, predictability, similarity, Terminus deltas, HaborMix selection.
+- `src/habor_mix_analyzer/figures.py`: paper-facing visualizations.
+- `src/habor_mix_analyzer/reports.py`: embedded Markdown reports.
+- `src/habor_mix_analyzer/pipeline.py`: short CLI orchestrator for step composition.
 
 ## Current Inputs
 
@@ -35,6 +61,8 @@ Paper-facing results:
 - `output/paper/reports/analysis_story.md`
 - `output/paper/reports/key_findings.md`
 - `output/paper/tables/benchmark_filtering.csv`
+- `output/paper/tables/analysis_data_provenance.csv`
+- `output/paper/tables/benchmark_raw_scores_long.csv`
 - `output/paper/tables/benchmark_model_adjusted_effects.csv`
 - `output/paper/tables/benchmark_agent_adjusted_effects.csv`
 - `output/paper/tables/benchmark_agent_lift_vs_terminus.csv`
@@ -81,4 +109,8 @@ The raw matrices are incomplete and have mixed score scales. The pipeline theref
 6. Builds benchmark correlation, predictability, similarity clusters, variance attribution, task difficulty, task similarity, task predictability, task representativeness, mini-leaderboards, and agent-differential tables.
 7. Filters sparse benchmarks before paper-facing analysis, then writes separate benchmark-level and task-level study outputs plus an embedded paper-facing narrative report.
 
-Trial consistency, pass@k, efficiency, IRT/DIF, and trajectory failure taxonomy are not implemented yet because the current raw files do not include trial IDs, trajectories, token/tool counts, wall time, or run-level error labels.
+The SVD-filled processed matrices are dense. Missingness columns in reports and tables refer to the original raw-table coverage, and are retained to distinguish measured evidence from SVD-filled cells.
+
+Per-benchmark mini-leaderboards use SVD-filled raw benchmark scores on each benchmark's original metric scale. Cross-benchmark regressions, similarity, and Terminus deltas still use benchmark-relative scores because raw scales are heterogeneous and cannot be averaged directly across benchmarks.
+
+Trial consistency, pass@k, efficiency, and trajectory failure taxonomy require run-level records with trial IDs, trajectories, tokens, tool calls, wall time, and error labels. Formal IRT/DIF remains deferred until repeated binary or calibrated response data is available; the current task matrix supports weaker task difficulty, discrimination, predictability, and representativeness analyses.
