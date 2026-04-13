@@ -94,7 +94,7 @@ parameterized threshold. Right now it sits in a table and that's it.
     - I am not sure if this is reasonable, but worth double check
 4. [bot + human]: The minileaderboard should be made in a better way
     - Should show all the agent+ model combinations we had. It's okay for it to be long and big
-    - I prefer the columns to be model names, and each model should have two bars together, each with a different color. Each color represents an agent. That way, we can clearly visualize the impact of agent vs model. This should apply to each individual leaderboard. The legend should show how color maps to agents
+    - I prefer the rows to be model names, and each model should have two bars together, each with a different color (there should be just 2 bars per model, so you shouldn't leave placeholder and "empty bars" for unavailable agents - should be a compact 2-bar structure). Each color represents an agent. That way, we can clearly visualize the impact of agent vs model. This should apply to each individual leaderboard. The legend should show how color maps to agents
 5. [human] difficulty composition chart's ticks is center aligned, but because benchmark names are long, this is actually hard to tell. I prefer letting the end of work mapping to the ticks. Also, for that graph, percentage should further be used rather than task count (that way I think all bars should be top-bottom full) - this gives us a better sense of the distribution - you should keep both charts. 
 6. [human] https://github.com/anadim/llm-benchmark-matrix . This is the dimitris BenchPress source repo. Please check it out to see what he did for analysis. While we are having a different data schema, his lessons are great to learn and see how we can map benchpress to our analysis framework
 7. [human] key_findings.md is to minimal! Again, use referred graphs to demonstrate the findings and isnsights.
@@ -103,3 +103,15 @@ parameterized threshold. Right now it sits in a table and that's it.
 10. [human] The name `paper` is weird to use, especially together with `studies`. Maybe use `key_analyses` and `intermediate_studies` instead? Or if you have better naming, feel free to use.
 11. [human] pipeline.py should be named to main.py for clarity.
 12. [human] There's no max-task cap for habor-mix selection per benchmark. We just want the most difficult + representative + unique / unpredicatable tasks. But you should include those "base" tasks to predict other benchmark scores right? Otherwise it won't become reprensentative. Let's prioritize representative for a minimal number, then add the most difficult + unique ones.
+13. [human] I replaced the raw csvs with the new data. There are some changes and therefore you need to rebuild the processed dataset and redo all analysis. Something more that I want to mention
+    - For the benchmark matrix, some values are missing, but from the task matrix, you can tell that it's because things haven't complete and therefore we leave it as blank. For those values, you should directly fill in benchmark values by aggregating the task matrix results - i.e., take subset performance to full bench performance prediction.
+    - Essentially, all benchmark scores fill in should be calculated from the task matrix - so we are only using SVD to fill in the task matrix, and then simply aggregate to obtain the benchmark scores. Hope this clarifies.
+
+
+---
+
+Much better! Several more comments:
+1. For minileaderboard bar charts, make the bars slighter fatter. Now they are too thin. You can enlarge the font size a bit more, and make the figure size a bit more smaller - that way the layout would be better
+2. For difficulty label colors, swap the color for frontier and difficult. Then it should be good-looking.
+3. For benchmark and task similarity heatmaps, I don't know what's your order - I prefer to order by clusters, i.e., more similar benchmarks should be placed together, so that the heatmap shows clear clustering patterns.
+4. benchmark uniqueness_vs_converage figure didn't seem to tell a good story from the layout. Maybe change the layout or even the analysis method?
