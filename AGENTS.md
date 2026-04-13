@@ -11,6 +11,8 @@ This repository contains a `uv`-run analysis pipeline for cross-benchmark agent 
 - Intermediate processed data lives under `data/processed/intermediate/`.
 - Expanded study outputs live under `output/intermediate_studies/`.
 - Important key analysis tables, figures, and reports live under `output/key_analyses/`.
+- Key analysis tables are layered by purpose under `output/key_analyses/tables/{benchmark_level,leaderboards,task_level,harbormix,provenance}/`.
+- Key analysis figures are layered by purpose under `output/key_analyses/figures/{benchmark_level,leaderboards,task_level,harbormix}/`.
 - The CLI entry point is `src/habor_mix_analyzer/cli.py`; `src/habor_mix_analyzer/main.py` is a compatibility wrapper for the installed script.
 - Step orchestration lives in `src/habor_mix_analyzer/orchestration/runner.py`.
 - Shared helpers live in `src/habor_mix_analyzer/core/`.

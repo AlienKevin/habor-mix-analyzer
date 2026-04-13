@@ -73,39 +73,15 @@ Key analysis results:
 
 - `output/key_analyses/reports/analysis_story.md`
 - `output/key_analyses/reports/key_findings.md`
-- `output/key_analyses/tables/benchmark_filtering.csv`
-- `output/key_analyses/tables/analysis_data_provenance.csv`
-- `output/key_analyses/tables/imputation_diagnostics_summary.csv`
-- `output/key_analyses/tables/benchmark_scores_long.csv`
-- `output/key_analyses/tables/benchmark_model_adjusted_effects.csv`
-- `output/key_analyses/tables/benchmark_agent_adjusted_effects.csv`
-- `output/key_analyses/tables/benchmark_agent_lift_vs_terminus.csv`
-- `output/key_analyses/tables/benchmark_model_agent_role_by_benchmark.csv`
-- `output/key_analyses/tables/benchmark_similarity_clusters.csv`
-- `output/key_analyses/tables/benchmark_uniqueness_filtered.csv`
-- `output/key_analyses/tables/task_predictability_ranked.csv`
-- `output/key_analyses/tables/task_representative_tasks.csv`
-- `output/key_analyses/tables/task_cross_benchmark_similarity.csv`
-- `output/key_analyses/tables/task_benchmark_reliable_summary.csv`
-- `output/key_analyses/tables/task_to_benchmark_alignment.csv`
-- `output/key_analyses/tables/harbormix_candidate_tasks.csv`
-- `output/key_analyses/tables/harbormix_selection_by_benchmark.csv`
-- `output/key_analyses/figures/benchmark_agent_model_top_scores.png`
-- `output/key_analyses/figures/benchmark_variance_attribution.png`
-- `output/key_analyses/figures/benchmark_model_vs_agent_role.png`
-- `output/key_analyses/figures/benchmark_similarity_clustered_heatmap.png`
-- `output/key_analyses/figures/benchmark_model_adjusted_effects.png`
-- `output/key_analyses/figures/benchmark_agent_adjusted_effects.png`
-- `output/key_analyses/figures/benchmark_agent_lift_heatmap.png`
-- `output/key_analyses/figures/terminus_delta_by_model_heatmap.png`
-- `output/key_analyses/figures/benchmark_uniqueness_vs_coverage.png`
-- `output/key_analyses/figures/task_hard_to_predict_ranked.png`
-- `output/key_analyses/figures/task_best_representatives.png`
-- `output/key_analyses/figures/task_similarity_benchmark_pair_heatmap.png`
-- `output/key_analyses/figures/harbormix_selection_diagnostics.png`
-- `output/key_analyses/figures/task_reliable_difficulty_composition.png`
-- `output/key_analyses/figures/task_reliable_difficulty_composition_percent.png`
-- `output/key_analyses/figures/task_to_benchmark_alignment.png`
+- `output/key_analyses/tables/benchmark_level/`: benchmark filtering, variance, predictability, similarity, and Terminus tables.
+- `output/key_analyses/tables/leaderboards/`: aggregate and per-benchmark agent+model leaderboard tables.
+- `output/key_analyses/tables/task_level/`: task reliability, task alignment, task similarity, task predictability, and representative-task tables.
+- `output/key_analyses/tables/harbormix/`: HaborMix candidate-selection tables.
+- `output/key_analyses/tables/provenance/`: data provenance and preprocessing diagnostics.
+- `output/key_analyses/figures/benchmark_level/`: benchmark role, similarity, uniqueness, variance, and Terminus figures.
+- `output/key_analyses/figures/leaderboards/`: aggregate leaderboard plus per-benchmark and cluster mini-leaderboards.
+- `output/key_analyses/figures/task_level/`: task difficulty, similarity, predictability, representative-task, and alignment figures.
+- `output/key_analyses/figures/harbormix/`: HaborMix candidate-selection diagnostics.
 
 Expanded study outputs:
 

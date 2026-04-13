@@ -47,7 +47,7 @@ def save_task_composition_plot(task_summary: pd.DataFrame) -> None:
         bbox_to_anchor=(1.01, 1.0),
     )
     fig.tight_layout(rect=(0, 0, 0.78, 1))
-    save_key_figure(fig, "task_reliable_difficulty_composition.png")
+    save_key_figure(fig, "task_level/task_reliable_difficulty_composition.png")
     plt.close(fig)
 
 
@@ -84,7 +84,7 @@ def save_task_composition_percent_plot(task_summary: pd.DataFrame) -> None:
         bbox_to_anchor=(1.01, 1.0),
     )
     fig.tight_layout(rect=(0, 0, 0.78, 1))
-    save_key_figure(fig, "task_reliable_difficulty_composition_percent.png")
+    save_key_figure(fig, "task_level/task_reliable_difficulty_composition_percent.png")
     plt.close(fig)
 
 
@@ -100,7 +100,7 @@ def save_task_alignment_plot(alignment: pd.DataFrame) -> None:
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_key_figure(fig, "task_to_benchmark_alignment.png")
+    save_key_figure(fig, "task_level/task_to_benchmark_alignment.png")
     plt.close(fig)
 
 
@@ -128,7 +128,7 @@ def save_task_similarity_heatmap(cross_similarity: pd.DataFrame, benchmark_clust
     cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label("Median absolute Spearman correlation between reliable task score profiles")
     fig.tight_layout()
-    save_key_figure(fig, "task_similarity_benchmark_pair_heatmap.png")
+    save_key_figure(fig, "task_level/task_similarity_benchmark_pair_heatmap.png")
     plt.close(fig)
 
 
@@ -142,7 +142,7 @@ def save_task_predictability_plot(task_predictability: pd.DataFrame) -> None:
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_key_figure(fig, "task_hard_to_predict_ranked.png")
+    save_key_figure(fig, "task_level/task_hard_to_predict_ranked.png")
     plt.close(fig)
 
 
@@ -157,7 +157,7 @@ def save_representative_task_plot(representatives: pd.DataFrame) -> None:
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_key_figure(fig, "task_best_representatives.png")
+    save_key_figure(fig, "task_level/task_best_representatives.png")
     plt.close(fig)
 
 
@@ -205,5 +205,5 @@ def save_harbormix_selection_plot(selected_tasks: pd.DataFrame) -> None:
     axes[3].set_ylabel("Composite selection score")
     axes[3].grid(color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_key_figure(fig, "harbormix_selection_diagnostics.png")
+    save_key_figure(fig, "harbormix/harbormix_selection_diagnostics.png")
     plt.close(fig)

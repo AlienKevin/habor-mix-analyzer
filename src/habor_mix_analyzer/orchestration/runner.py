@@ -119,6 +119,23 @@ KEY_ANALYSIS_TABLES = [
     "harbormix_selection_by_benchmark",
 ]
 
+KEY_TABLE_SUBDIRS = {
+    "analysis_data_provenance": "provenance",
+    "imputation_diagnostics_summary": "provenance",
+    "benchmark_agent_model_scores": "leaderboards",
+    "benchmark_scores_long": "leaderboards",
+    "benchmark_mini_leaderboards": "leaderboards",
+    "task_benchmark_reliable_summary": "task_level",
+    "task_to_benchmark_alignment": "task_level",
+    "task_within_benchmark_similarity": "task_level",
+    "task_cross_benchmark_similarity": "task_level",
+    "task_representative_tasks": "task_level",
+    "task_predictability_ranked": "task_level",
+    "harbormix_candidate_tasks": "harbormix",
+    "harbormix_selection_by_benchmark": "harbormix",
+    "terminus_delta_by_model": "benchmark_level",
+}
+
 
 def log(message: str) -> None:
     print(f"[habor-analyze] {message}", flush=True)
@@ -344,7 +361,8 @@ def write_study_tables(study_tables: dict[str, pd.DataFrame]) -> None:
         directory = BENCHMARK_INTERMEDIATE_STUDY_DIR if name.startswith("benchmark") or name.startswith("analysis") else TASK_INTERMEDIATE_STUDY_DIR
         write_csv(table, directory / f"{name}.csv")
     for name in KEY_ANALYSIS_TABLES:
-        write_csv(study_tables[name], KEY_TABLE_DIR / f"{name}.csv")
+        subdir = KEY_TABLE_SUBDIRS.get(name, "benchmark_level" if name.startswith("benchmark") else "task_level")
+        write_csv(study_tables[name], KEY_TABLE_DIR / subdir / f"{name}.csv")
 
 
 def write_study_figures(study_tables: dict[str, pd.DataFrame]) -> None:

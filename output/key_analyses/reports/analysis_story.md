@@ -6,6 +6,8 @@ This report is intended to be read directly. Figures and compact table previews 
 
 - Key analysis tables: `output/key_analyses/tables/`
 - Key analysis figures: `output/key_analyses/figures/`
+- Layered table groups: `benchmark_level/`, `leaderboards/`, `task_level/`, `harbormix/`, and `provenance/`.
+- Layered figure groups: `benchmark_level/`, `leaderboards/`, `task_level/`, and `harbormix/`.
 - Intermediate study outputs: `output/intermediate_studies/`
 - Intermediate imputed matrices and diagnostics: `data/processed/intermediate/`
 
@@ -39,13 +41,13 @@ Task imputation method: each score column is robustly centered and scaled after 
 
 | Question | Status | Main artifacts |
 | --- | --- | --- |
-| Agent vs model role overall and per benchmark | covered | `benchmark_variance_decomposition_filtered.csv`, `benchmark_model_agent_role_by_benchmark.csv`, `benchmark_model_vs_agent_role.png` |
-| BenchPress-style benchmark predictability and hard-to-predict benchmarks/tasks | covered | `benchmark_uniqueness_filtered.csv`, `task_predictability_ranked.csv`, `benchmark_uniqueness_vs_coverage.png`, `task_hard_to_predict_ranked.png` |
-| Benchmark/task similarity and clustering | covered | `benchmark_similarity_clusters.csv`, `benchmark_correlation_clustered.csv`, `task_within_benchmark_similarity.csv`, `task_cross_benchmark_similarity.csv`, clustered heatmaps |
-| Representative tasks per benchmark | covered | `task_representative_tasks.csv`, `task_best_representatives.png` |
-| Mini-leaderboards grouped by similar benchmarks | covered | `benchmark_mini_leaderboards.csv`, `mini_leaderboards_cluster_*.png` |
-| Agent harness improvements over Terminus | covered | `benchmark_agent_lift_vs_terminus.csv`, `terminus_delta_by_model.csv`, Terminus heatmaps |
-| Quantitative HaborMix task selection | covered | `harbormix_candidate_tasks.csv`, `harbormix_selection_by_benchmark.csv`, `harbormix_selection_diagnostics.png` |
+| Agent vs model role overall and per benchmark | covered | `tables/benchmark_level/benchmark_variance_decomposition_filtered.csv`, `tables/benchmark_level/benchmark_model_agent_role_by_benchmark.csv`, `figures/benchmark_level/benchmark_model_vs_agent_role.png` |
+| BenchPress-style benchmark predictability and hard-to-predict benchmarks/tasks | covered | `tables/benchmark_level/benchmark_uniqueness_filtered.csv`, `tables/task_level/task_predictability_ranked.csv`, benchmark/task predictability figures |
+| Benchmark/task similarity and clustering | covered | `tables/benchmark_level/benchmark_similarity_clusters.csv`, `tables/task_level/task_cross_benchmark_similarity.csv`, clustered heatmaps |
+| Representative tasks per benchmark | covered | `tables/task_level/task_representative_tasks.csv`, `figures/task_level/task_best_representatives.png` |
+| Mini-leaderboards grouped by similar benchmarks | covered | `tables/leaderboards/benchmark_mini_leaderboards.csv`, `figures/leaderboards/mini_leaderboards_cluster_*.png` |
+| Agent harness improvements over Terminus | covered | `tables/benchmark_level/benchmark_agent_lift_vs_terminus.csv`, `tables/benchmark_level/terminus_delta_by_model.csv`, Terminus heatmaps |
+| Quantitative HaborMix task selection | covered | `tables/harbormix/harbormix_candidate_tasks.csv`, `tables/harbormix/harbormix_selection_by_benchmark.csv`, `figures/harbormix/harbormix_selection_diagnostics.png` |
 
 ## Study 1: Coverage Filtering
 
@@ -70,7 +72,7 @@ Task imputation method: each score column is robustly centered and scaled after 
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/benchmark_filtering.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_filtering.csv`
 
 **Result overview and analysis:**
 - Included 40 of 45 benchmarks.
@@ -117,18 +119,18 @@ Task imputation method: each score column is robustly centered and scaled after 
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/benchmark_variance_decomposition_filtered.csv`
-- `output/key_analyses/tables/benchmark_model_agent_role_by_benchmark.csv`
-- `output/key_analyses/tables/benchmark_model_adjusted_effects.csv`
-- `output/key_analyses/tables/benchmark_agent_adjusted_effects.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_variance_decomposition_filtered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_model_agent_role_by_benchmark.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_model_adjusted_effects.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_agent_adjusted_effects.csv`
 
-![Benchmark-level variance attribution](../figures/benchmark_variance_attribution.png)
+![Benchmark-level variance attribution](../figures/benchmark_level/benchmark_variance_attribution.png)
 
-![Per-benchmark model vs agent explanatory power](../figures/benchmark_model_vs_agent_role.png)
+![Per-benchmark model vs agent explanatory power](../figures/benchmark_level/benchmark_model_vs_agent_role.png)
 
-![Model effects adjusted for agent and benchmark](../figures/benchmark_model_adjusted_effects.png)
+![Model effects adjusted for agent and benchmark](../figures/benchmark_level/benchmark_model_adjusted_effects.png)
 
-![Agent effects adjusted for model and benchmark](../figures/benchmark_agent_adjusted_effects.png)
+![Agent effects adjusted for model and benchmark](../figures/benchmark_level/benchmark_agent_adjusted_effects.png)
 
 **Result overview and analysis:**
 | component | partial_r2_over_other_main_effects | r2 | type |
@@ -180,67 +182,67 @@ Benchmarks with the largest model-vs-agent role imbalance:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/benchmark_agent_model_scores.csv`
-- `output/key_analyses/tables/benchmark_scores_long.csv`
-- `output/key_analyses/tables/benchmark_mini_leaderboards.csv`
-- `output/key_analyses/tables/benchmark_similarity_clusters.csv`
-- `output/key_analyses/figures/mini_leaderboards_cluster_*.png`
+- `output/key_analyses/tables/leaderboards/benchmark_agent_model_scores.csv`
+- `output/key_analyses/tables/leaderboards/benchmark_scores_long.csv`
+- `output/key_analyses/tables/leaderboards/benchmark_mini_leaderboards.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_similarity_clusters.csv`
+- `output/key_analyses/figures/leaderboards/mini_leaderboards_cluster_*.png`
 
-![Top agent+model pairs on included benchmarks](../figures/benchmark_agent_model_top_scores.png)
+![Top agent+model pairs on included benchmarks](../figures/leaderboards/benchmark_agent_model_top_scores.png)
 
-![Mini-leaderboards mini_leaderboard_medagentbench.png](../figures/mini_leaderboard_medagentbench.png)
-![Mini-leaderboards mini_leaderboard_mmau.png](../figures/mini_leaderboard_mmau.png)
-![Mini-leaderboards mini_leaderboards_cluster_1_page_1.png](../figures/mini_leaderboards_cluster_1_page_1.png)
-![Mini-leaderboards mini_leaderboard_ineqmath.png](../figures/mini_leaderboard_ineqmath.png)
-![Mini-leaderboards mini_leaderboards_cluster_2_page_1.png](../figures/mini_leaderboards_cluster_2_page_1.png)
-![Mini-leaderboards mini_leaderboard_compilebench.png](../figures/mini_leaderboard_compilebench.png)
-![Mini-leaderboards mini_leaderboard_swtbench.png](../figures/mini_leaderboard_swtbench.png)
-![Mini-leaderboards mini_leaderboards_cluster_3_page_1.png](../figures/mini_leaderboards_cluster_3_page_1.png)
-![Mini-leaderboards mini_leaderboard_aider-polyglot.png](../figures/mini_leaderboard_aider-polyglot.png)
-![Mini-leaderboards mini_leaderboard_aime.png](../figures/mini_leaderboard_aime.png)
-![Mini-leaderboards mini_leaderboard_algotune.png](../figures/mini_leaderboard_algotune.png)
-![Mini-leaderboards mini_leaderboard_arc-agi-2.png](../figures/mini_leaderboard_arc-agi-2.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_1.png](../figures/mini_leaderboards_cluster_4_page_1.png)
-![Mini-leaderboards mini_leaderboard_bixbench.png](../figures/mini_leaderboard_bixbench.png)
-![Mini-leaderboards mini_leaderboard_crustbench.png](../figures/mini_leaderboard_crustbench.png)
-![Mini-leaderboards mini_leaderboard_featurebench-modal.png](../figures/mini_leaderboard_featurebench-modal.png)
-![Mini-leaderboards mini_leaderboard_gaia.png](../figures/mini_leaderboard_gaia.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_2.png](../figures/mini_leaderboards_cluster_4_page_2.png)
-![Mini-leaderboards mini_leaderboard_gpqa-diamond.png](../figures/mini_leaderboard_gpqa-diamond.png)
-![Mini-leaderboards mini_leaderboard_gso.png](../figures/mini_leaderboard_gso.png)
-![Mini-leaderboards mini_leaderboard_humanevalfix.png](../figures/mini_leaderboard_humanevalfix.png)
-![Mini-leaderboards mini_leaderboard_kumo.png](../figures/mini_leaderboard_kumo.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_3.png](../figures/mini_leaderboards_cluster_4_page_3.png)
-![Mini-leaderboards mini_leaderboard_labbench.png](../figures/mini_leaderboard_labbench.png)
-![Mini-leaderboards mini_leaderboard_lawbench.png](../figures/mini_leaderboard_lawbench.png)
-![Mini-leaderboards mini_leaderboard_livecodebench.png](../figures/mini_leaderboard_livecodebench.png)
-![Mini-leaderboards mini_leaderboard_mmmlu.png](../figures/mini_leaderboard_mmmlu.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_4.png](../figures/mini_leaderboards_cluster_4_page_4.png)
-![Mini-leaderboards mini_leaderboard_omnimath.png](../figures/mini_leaderboard_omnimath.png)
-![Mini-leaderboards mini_leaderboard_qcircuitbench.png](../figures/mini_leaderboard_qcircuitbench.png)
-![Mini-leaderboards mini_leaderboard_reasoning-gym.png](../figures/mini_leaderboard_reasoning-gym.png)
-![Mini-leaderboards mini_leaderboard_replicationbench.png](../figures/mini_leaderboard_replicationbench.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_5.png](../figures/mini_leaderboards_cluster_4_page_5.png)
-![Mini-leaderboards mini_leaderboard_seal0.png](../figures/mini_leaderboard_seal0.png)
-![Mini-leaderboards mini_leaderboard_simpleqa.png](../figures/mini_leaderboard_simpleqa.png)
-![Mini-leaderboards mini_leaderboard_sldbench.png](../figures/mini_leaderboard_sldbench.png)
-![Mini-leaderboards mini_leaderboard_spider2.png](../figures/mini_leaderboard_spider2.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_6.png](../figures/mini_leaderboards_cluster_4_page_6.png)
-![Mini-leaderboards mini_leaderboard_swe-lancer.png](../figures/mini_leaderboard_swe-lancer.png)
-![Mini-leaderboards mini_leaderboard_swebench-multilingual.png](../figures/mini_leaderboard_swebench-multilingual.png)
-![Mini-leaderboards mini_leaderboard_swebenchpro.png](../figures/mini_leaderboard_swebenchpro.png)
-![Mini-leaderboards mini_leaderboard_usaco.png](../figures/mini_leaderboard_usaco.png)
-![Mini-leaderboards mini_leaderboards_cluster_4_page_7.png](../figures/mini_leaderboards_cluster_4_page_7.png)
-![Mini-leaderboards mini_leaderboard_bfcl.png](../figures/mini_leaderboard_bfcl.png)
-![Mini-leaderboards mini_leaderboard_bigcodebench.png](../figures/mini_leaderboard_bigcodebench.png)
-![Mini-leaderboards mini_leaderboard_codepde.png](../figures/mini_leaderboard_codepde.png)
-![Mini-leaderboards mini_leaderboard_devopsgym.png](../figures/mini_leaderboard_devopsgym.png)
-![Mini-leaderboards mini_leaderboards_cluster_5_page_1.png](../figures/mini_leaderboards_cluster_5_page_1.png)
-![Mini-leaderboards mini_leaderboard_swebench-verified.png](../figures/mini_leaderboard_swebench-verified.png)
-![Mini-leaderboards mini_leaderboard_swesmith.png](../figures/mini_leaderboard_swesmith.png)
-![Mini-leaderboards mini_leaderboards_cluster_5_page_2.png](../figures/mini_leaderboards_cluster_5_page_2.png)
-![Mini-leaderboards mini_leaderboard_strongreject.png](../figures/mini_leaderboard_strongreject.png)
-![Mini-leaderboards mini_leaderboards_cluster_6_page_1.png](../figures/mini_leaderboards_cluster_6_page_1.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_medagentbench.png](../figures/leaderboards/mini_leaderboard_medagentbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_mmau.png](../figures/leaderboards/mini_leaderboard_mmau.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_1_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_1_page_1.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_ineqmath.png](../figures/leaderboards/mini_leaderboard_ineqmath.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_2_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_2_page_1.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_compilebench.png](../figures/leaderboards/mini_leaderboard_compilebench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_swtbench.png](../figures/leaderboards/mini_leaderboard_swtbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_3_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_3_page_1.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_aider-polyglot.png](../figures/leaderboards/mini_leaderboard_aider-polyglot.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_aime.png](../figures/leaderboards/mini_leaderboard_aime.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_algotune.png](../figures/leaderboards/mini_leaderboard_algotune.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_arc-agi-2.png](../figures/leaderboards/mini_leaderboard_arc-agi-2.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_1.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_bixbench.png](../figures/leaderboards/mini_leaderboard_bixbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_crustbench.png](../figures/leaderboards/mini_leaderboard_crustbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_featurebench-modal.png](../figures/leaderboards/mini_leaderboard_featurebench-modal.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_gaia.png](../figures/leaderboards/mini_leaderboard_gaia.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_2.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_2.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_gpqa-diamond.png](../figures/leaderboards/mini_leaderboard_gpqa-diamond.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_gso.png](../figures/leaderboards/mini_leaderboard_gso.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_humanevalfix.png](../figures/leaderboards/mini_leaderboard_humanevalfix.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_kumo.png](../figures/leaderboards/mini_leaderboard_kumo.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_3.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_3.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_labbench.png](../figures/leaderboards/mini_leaderboard_labbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_lawbench.png](../figures/leaderboards/mini_leaderboard_lawbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_livecodebench.png](../figures/leaderboards/mini_leaderboard_livecodebench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_mmmlu.png](../figures/leaderboards/mini_leaderboard_mmmlu.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_4.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_4.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_omnimath.png](../figures/leaderboards/mini_leaderboard_omnimath.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_qcircuitbench.png](../figures/leaderboards/mini_leaderboard_qcircuitbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_reasoning-gym.png](../figures/leaderboards/mini_leaderboard_reasoning-gym.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_replicationbench.png](../figures/leaderboards/mini_leaderboard_replicationbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_5.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_5.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_seal0.png](../figures/leaderboards/mini_leaderboard_seal0.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_simpleqa.png](../figures/leaderboards/mini_leaderboard_simpleqa.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_sldbench.png](../figures/leaderboards/mini_leaderboard_sldbench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_spider2.png](../figures/leaderboards/mini_leaderboard_spider2.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_6.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_6.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_swe-lancer.png](../figures/leaderboards/mini_leaderboard_swe-lancer.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_swebench-multilingual.png](../figures/leaderboards/mini_leaderboard_swebench-multilingual.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_swebenchpro.png](../figures/leaderboards/mini_leaderboard_swebenchpro.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_usaco.png](../figures/leaderboards/mini_leaderboard_usaco.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_4_page_7.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_7.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_bfcl.png](../figures/leaderboards/mini_leaderboard_bfcl.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_bigcodebench.png](../figures/leaderboards/mini_leaderboard_bigcodebench.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_codepde.png](../figures/leaderboards/mini_leaderboard_codepde.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_devopsgym.png](../figures/leaderboards/mini_leaderboard_devopsgym.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_5_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_5_page_1.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_swebench-verified.png](../figures/leaderboards/mini_leaderboard_swebench-verified.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_swesmith.png](../figures/leaderboards/mini_leaderboard_swesmith.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_5_page_2.png](../figures/leaderboards/mini_leaderboards_cluster_5_page_2.png)
+![Mini-leaderboards leaderboards/mini_leaderboard_strongreject.png](../figures/leaderboards/mini_leaderboard_strongreject.png)
+![Mini-leaderboards leaderboards/mini_leaderboards_cluster_6_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_6_page_1.png)
 
 **Result overview and analysis:**
 | rank | agent_model | mean_score_percentile_across_benchmarks | original_benchmark_table_coverage |
@@ -281,13 +283,13 @@ Benchmarks with the largest model-vs-agent role imbalance:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/benchmark_uniqueness_filtered.csv`
-- `output/key_analyses/tables/benchmark_redundancy_pairs_filtered.csv`
-- `output/key_analyses/tables/benchmark_correlation_clustered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_uniqueness_filtered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_redundancy_pairs_filtered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_correlation_clustered.csv`
 
-![Benchmark uniqueness after coverage filtering](../figures/benchmark_uniqueness_vs_coverage.png)
+![Benchmark uniqueness after coverage filtering](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
 
-![Clustered benchmark similarity heatmap](../figures/benchmark_similarity_clustered_heatmap.png)
+![Clustered benchmark similarity heatmap](../figures/benchmark_level/benchmark_similarity_clustered_heatmap.png)
 
 **Result overview and analysis:**
 Hardest-to-predict benchmarks:
@@ -343,16 +345,16 @@ Most similar benchmark pairs:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/task_predictability_ranked.csv`
-- `output/key_analyses/tables/task_representative_tasks.csv`
-- `output/key_analyses/tables/task_within_benchmark_similarity.csv`
-- `output/key_analyses/tables/task_cross_benchmark_similarity.csv`
+- `output/key_analyses/tables/task_level/task_predictability_ranked.csv`
+- `output/key_analyses/tables/task_level/task_representative_tasks.csv`
+- `output/key_analyses/tables/task_level/task_within_benchmark_similarity.csv`
+- `output/key_analyses/tables/task_level/task_cross_benchmark_similarity.csv`
 
-![Hard-to-predict reliable tasks](../figures/task_hard_to_predict_ranked.png)
+![Hard-to-predict reliable tasks](../figures/task_level/task_hard_to_predict_ranked.png)
 
-![Best representative task per benchmark](../figures/task_best_representatives.png)
+![Best representative task per benchmark](../figures/task_level/task_best_representatives.png)
 
-![Task similarity across benchmark pairs](../figures/task_similarity_benchmark_pair_heatmap.png)
+![Task similarity across benchmark pairs](../figures/task_level/task_similarity_benchmark_pair_heatmap.png)
 
 **Result overview and analysis:**
 Hardest-to-predict reliable tasks:
@@ -426,13 +428,13 @@ Benchmarks with strongest within-benchmark task similarity:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/benchmark_agent_lift_vs_terminus.csv`
-- `output/key_analyses/tables/terminus_delta_by_model.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_agent_lift_vs_terminus.csv`
+- `output/key_analyses/tables/benchmark_level/terminus_delta_by_model.csv`
 - `output/intermediate_studies/benchmark_level/benchmark_agent_lift_by_benchmark.csv`
 
-![Agent lift vs terminus by benchmark](../figures/benchmark_agent_lift_heatmap.png)
+![Agent lift vs terminus by benchmark](../figures/benchmark_level/benchmark_agent_lift_heatmap.png)
 
-![Agent lift vs terminus by model](../figures/terminus_delta_by_model_heatmap.png)
+![Agent lift vs terminus by model](../figures/benchmark_level/terminus_delta_by_model_heatmap.png)
 
 **Result overview and analysis:**
 | agent | mean_delta_vs_terminus | win_rate_vs_terminus | compared_models |
@@ -481,15 +483,15 @@ Benchmarks with strongest within-benchmark task similarity:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/harbormix_candidate_tasks.csv`
-- `output/key_analyses/tables/harbormix_selection_by_benchmark.csv`
+- `output/key_analyses/tables/harbormix/harbormix_candidate_tasks.csv`
+- `output/key_analyses/tables/harbormix/harbormix_selection_by_benchmark.csv`
 - `output/intermediate_studies/task_level/task_frontier_or_saturated_watchlist.csv`
 
-![HaborMix selection diagnostics](../figures/harbormix_selection_diagnostics.png)
+![HaborMix selection diagnostics](../figures/harbormix/harbormix_selection_diagnostics.png)
 
-![Reliable bounded task difficulty composition](../figures/task_reliable_difficulty_composition.png)
+![Reliable bounded task difficulty composition](../figures/task_level/task_reliable_difficulty_composition.png)
 
-![Reliable bounded task difficulty composition by percentage](../figures/task_reliable_difficulty_composition_percent.png)
+![Reliable bounded task difficulty composition by percentage](../figures/task_level/task_reliable_difficulty_composition_percent.png)
 
 **Result overview and analysis:**
 | benchmark | difficulty_tier | selected_tasks | mean_selection_score | mean_representative_signal | mean_unique_unpredictable_signal | mean_difficulty_signal |
@@ -536,9 +538,9 @@ Benchmarks with strongest within-benchmark task similarity:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/task_to_benchmark_alignment.csv`
+- `output/key_analyses/tables/task_level/task_to_benchmark_alignment.csv`
 
-![Task aggregate vs benchmark score alignment](../figures/task_to_benchmark_alignment.png)
+![Task aggregate vs benchmark score alignment](../figures/task_level/task_to_benchmark_alignment.png)
 
 **Result overview and analysis:**
 | benchmark | n_reliable_bounded_tasks | spearman_agent_model_correlation | alignment_quality |
@@ -565,101 +567,101 @@ The emerging story is that benchmark diversity matters more than a single aggreg
 ## Artifact Index
 
 All key analysis tables:
-- `output/key_analyses/tables/analysis_data_provenance.csv`
-- `output/key_analyses/tables/benchmark_agent_adjusted_effects.csv`
-- `output/key_analyses/tables/benchmark_agent_lift_vs_terminus.csv`
-- `output/key_analyses/tables/benchmark_agent_model_scores.csv`
-- `output/key_analyses/tables/benchmark_correlation_clustered.csv`
-- `output/key_analyses/tables/benchmark_filtering.csv`
-- `output/key_analyses/tables/benchmark_mini_leaderboards.csv`
-- `output/key_analyses/tables/benchmark_model_adjusted_effects.csv`
-- `output/key_analyses/tables/benchmark_model_agent_role_by_benchmark.csv`
-- `output/key_analyses/tables/benchmark_redundancy_pairs_filtered.csv`
-- `output/key_analyses/tables/benchmark_scores_long.csv`
-- `output/key_analyses/tables/benchmark_similarity_clusters.csv`
-- `output/key_analyses/tables/benchmark_uniqueness_filtered.csv`
-- `output/key_analyses/tables/benchmark_variance_decomposition_filtered.csv`
-- `output/key_analyses/tables/harbormix_candidate_tasks.csv`
-- `output/key_analyses/tables/harbormix_selection_by_benchmark.csv`
-- `output/key_analyses/tables/imputation_diagnostics_summary.csv`
-- `output/key_analyses/tables/task_benchmark_reliable_summary.csv`
-- `output/key_analyses/tables/task_cross_benchmark_similarity.csv`
-- `output/key_analyses/tables/task_predictability_ranked.csv`
-- `output/key_analyses/tables/task_representative_tasks.csv`
-- `output/key_analyses/tables/task_to_benchmark_alignment.csv`
-- `output/key_analyses/tables/task_within_benchmark_similarity.csv`
-- `output/key_analyses/tables/terminus_delta_by_model.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_agent_adjusted_effects.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_agent_lift_vs_terminus.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_correlation_clustered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_filtering.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_model_adjusted_effects.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_model_agent_role_by_benchmark.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_redundancy_pairs_filtered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_similarity_clusters.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_uniqueness_filtered.csv`
+- `output/key_analyses/tables/benchmark_level/benchmark_variance_decomposition_filtered.csv`
+- `output/key_analyses/tables/benchmark_level/terminus_delta_by_model.csv`
+- `output/key_analyses/tables/harbormix/harbormix_candidate_tasks.csv`
+- `output/key_analyses/tables/harbormix/harbormix_selection_by_benchmark.csv`
+- `output/key_analyses/tables/leaderboards/benchmark_agent_model_scores.csv`
+- `output/key_analyses/tables/leaderboards/benchmark_mini_leaderboards.csv`
+- `output/key_analyses/tables/leaderboards/benchmark_scores_long.csv`
+- `output/key_analyses/tables/provenance/analysis_data_provenance.csv`
+- `output/key_analyses/tables/provenance/imputation_diagnostics_summary.csv`
+- `output/key_analyses/tables/task_level/task_benchmark_reliable_summary.csv`
+- `output/key_analyses/tables/task_level/task_cross_benchmark_similarity.csv`
+- `output/key_analyses/tables/task_level/task_predictability_ranked.csv`
+- `output/key_analyses/tables/task_level/task_representative_tasks.csv`
+- `output/key_analyses/tables/task_level/task_to_benchmark_alignment.csv`
+- `output/key_analyses/tables/task_level/task_within_benchmark_similarity.csv`
 
 All key analysis figures:
-![benchmark_agent_adjusted_effects.png](../figures/benchmark_agent_adjusted_effects.png)
-![benchmark_agent_lift_heatmap.png](../figures/benchmark_agent_lift_heatmap.png)
-![benchmark_agent_model_top_scores.png](../figures/benchmark_agent_model_top_scores.png)
-![benchmark_model_adjusted_effects.png](../figures/benchmark_model_adjusted_effects.png)
-![benchmark_model_vs_agent_role.png](../figures/benchmark_model_vs_agent_role.png)
-![benchmark_similarity_clustered_heatmap.png](../figures/benchmark_similarity_clustered_heatmap.png)
-![benchmark_uniqueness_vs_coverage.png](../figures/benchmark_uniqueness_vs_coverage.png)
-![benchmark_variance_attribution.png](../figures/benchmark_variance_attribution.png)
-![harbormix_selection_diagnostics.png](../figures/harbormix_selection_diagnostics.png)
-![mini_leaderboard_aider-polyglot.png](../figures/mini_leaderboard_aider-polyglot.png)
-![mini_leaderboard_aime.png](../figures/mini_leaderboard_aime.png)
-![mini_leaderboard_algotune.png](../figures/mini_leaderboard_algotune.png)
-![mini_leaderboard_arc-agi-2.png](../figures/mini_leaderboard_arc-agi-2.png)
-![mini_leaderboard_bfcl.png](../figures/mini_leaderboard_bfcl.png)
-![mini_leaderboard_bigcodebench.png](../figures/mini_leaderboard_bigcodebench.png)
-![mini_leaderboard_bixbench.png](../figures/mini_leaderboard_bixbench.png)
-![mini_leaderboard_codepde.png](../figures/mini_leaderboard_codepde.png)
-![mini_leaderboard_compilebench.png](../figures/mini_leaderboard_compilebench.png)
-![mini_leaderboard_crustbench.png](../figures/mini_leaderboard_crustbench.png)
-![mini_leaderboard_devopsgym.png](../figures/mini_leaderboard_devopsgym.png)
-![mini_leaderboard_featurebench-modal.png](../figures/mini_leaderboard_featurebench-modal.png)
-![mini_leaderboard_gaia.png](../figures/mini_leaderboard_gaia.png)
-![mini_leaderboard_gpqa-diamond.png](../figures/mini_leaderboard_gpqa-diamond.png)
-![mini_leaderboard_gso.png](../figures/mini_leaderboard_gso.png)
-![mini_leaderboard_humanevalfix.png](../figures/mini_leaderboard_humanevalfix.png)
-![mini_leaderboard_ineqmath.png](../figures/mini_leaderboard_ineqmath.png)
-![mini_leaderboard_kumo.png](../figures/mini_leaderboard_kumo.png)
-![mini_leaderboard_labbench.png](../figures/mini_leaderboard_labbench.png)
-![mini_leaderboard_lawbench.png](../figures/mini_leaderboard_lawbench.png)
-![mini_leaderboard_livecodebench.png](../figures/mini_leaderboard_livecodebench.png)
-![mini_leaderboard_medagentbench.png](../figures/mini_leaderboard_medagentbench.png)
-![mini_leaderboard_mmau.png](../figures/mini_leaderboard_mmau.png)
-![mini_leaderboard_mmmlu.png](../figures/mini_leaderboard_mmmlu.png)
-![mini_leaderboard_omnimath.png](../figures/mini_leaderboard_omnimath.png)
-![mini_leaderboard_qcircuitbench.png](../figures/mini_leaderboard_qcircuitbench.png)
-![mini_leaderboard_reasoning-gym.png](../figures/mini_leaderboard_reasoning-gym.png)
-![mini_leaderboard_replicationbench.png](../figures/mini_leaderboard_replicationbench.png)
-![mini_leaderboard_seal0.png](../figures/mini_leaderboard_seal0.png)
-![mini_leaderboard_simpleqa.png](../figures/mini_leaderboard_simpleqa.png)
-![mini_leaderboard_sldbench.png](../figures/mini_leaderboard_sldbench.png)
-![mini_leaderboard_spider2.png](../figures/mini_leaderboard_spider2.png)
-![mini_leaderboard_strongreject.png](../figures/mini_leaderboard_strongreject.png)
-![mini_leaderboard_swe-lancer.png](../figures/mini_leaderboard_swe-lancer.png)
-![mini_leaderboard_swebench-multilingual.png](../figures/mini_leaderboard_swebench-multilingual.png)
-![mini_leaderboard_swebench-verified.png](../figures/mini_leaderboard_swebench-verified.png)
-![mini_leaderboard_swebenchpro.png](../figures/mini_leaderboard_swebenchpro.png)
-![mini_leaderboard_swesmith.png](../figures/mini_leaderboard_swesmith.png)
-![mini_leaderboard_swtbench.png](../figures/mini_leaderboard_swtbench.png)
-![mini_leaderboard_usaco.png](../figures/mini_leaderboard_usaco.png)
-![mini_leaderboards_cluster_1_page_1.png](../figures/mini_leaderboards_cluster_1_page_1.png)
-![mini_leaderboards_cluster_2_page_1.png](../figures/mini_leaderboards_cluster_2_page_1.png)
-![mini_leaderboards_cluster_3_page_1.png](../figures/mini_leaderboards_cluster_3_page_1.png)
-![mini_leaderboards_cluster_4_page_1.png](../figures/mini_leaderboards_cluster_4_page_1.png)
-![mini_leaderboards_cluster_4_page_2.png](../figures/mini_leaderboards_cluster_4_page_2.png)
-![mini_leaderboards_cluster_4_page_3.png](../figures/mini_leaderboards_cluster_4_page_3.png)
-![mini_leaderboards_cluster_4_page_4.png](../figures/mini_leaderboards_cluster_4_page_4.png)
-![mini_leaderboards_cluster_4_page_5.png](../figures/mini_leaderboards_cluster_4_page_5.png)
-![mini_leaderboards_cluster_4_page_6.png](../figures/mini_leaderboards_cluster_4_page_6.png)
-![mini_leaderboards_cluster_4_page_7.png](../figures/mini_leaderboards_cluster_4_page_7.png)
-![mini_leaderboards_cluster_5_page_1.png](../figures/mini_leaderboards_cluster_5_page_1.png)
-![mini_leaderboards_cluster_5_page_2.png](../figures/mini_leaderboards_cluster_5_page_2.png)
-![mini_leaderboards_cluster_6_page_1.png](../figures/mini_leaderboards_cluster_6_page_1.png)
-![task_best_representatives.png](../figures/task_best_representatives.png)
-![task_hard_to_predict_ranked.png](../figures/task_hard_to_predict_ranked.png)
-![task_reliable_difficulty_composition.png](../figures/task_reliable_difficulty_composition.png)
-![task_reliable_difficulty_composition_percent.png](../figures/task_reliable_difficulty_composition_percent.png)
-![task_similarity_benchmark_pair_heatmap.png](../figures/task_similarity_benchmark_pair_heatmap.png)
-![task_to_benchmark_alignment.png](../figures/task_to_benchmark_alignment.png)
-![terminus_delta_by_model_heatmap.png](../figures/terminus_delta_by_model_heatmap.png)
+![benchmark_level/benchmark_agent_adjusted_effects.png](../figures/benchmark_level/benchmark_agent_adjusted_effects.png)
+![benchmark_level/benchmark_agent_lift_heatmap.png](../figures/benchmark_level/benchmark_agent_lift_heatmap.png)
+![benchmark_level/benchmark_model_adjusted_effects.png](../figures/benchmark_level/benchmark_model_adjusted_effects.png)
+![benchmark_level/benchmark_model_vs_agent_role.png](../figures/benchmark_level/benchmark_model_vs_agent_role.png)
+![benchmark_level/benchmark_similarity_clustered_heatmap.png](../figures/benchmark_level/benchmark_similarity_clustered_heatmap.png)
+![benchmark_level/benchmark_uniqueness_vs_coverage.png](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
+![benchmark_level/benchmark_variance_attribution.png](../figures/benchmark_level/benchmark_variance_attribution.png)
+![benchmark_level/terminus_delta_by_model_heatmap.png](../figures/benchmark_level/terminus_delta_by_model_heatmap.png)
+![harbormix/harbormix_selection_diagnostics.png](../figures/harbormix/harbormix_selection_diagnostics.png)
+![leaderboards/benchmark_agent_model_top_scores.png](../figures/leaderboards/benchmark_agent_model_top_scores.png)
+![leaderboards/mini_leaderboard_aider-polyglot.png](../figures/leaderboards/mini_leaderboard_aider-polyglot.png)
+![leaderboards/mini_leaderboard_aime.png](../figures/leaderboards/mini_leaderboard_aime.png)
+![leaderboards/mini_leaderboard_algotune.png](../figures/leaderboards/mini_leaderboard_algotune.png)
+![leaderboards/mini_leaderboard_arc-agi-2.png](../figures/leaderboards/mini_leaderboard_arc-agi-2.png)
+![leaderboards/mini_leaderboard_bfcl.png](../figures/leaderboards/mini_leaderboard_bfcl.png)
+![leaderboards/mini_leaderboard_bigcodebench.png](../figures/leaderboards/mini_leaderboard_bigcodebench.png)
+![leaderboards/mini_leaderboard_bixbench.png](../figures/leaderboards/mini_leaderboard_bixbench.png)
+![leaderboards/mini_leaderboard_codepde.png](../figures/leaderboards/mini_leaderboard_codepde.png)
+![leaderboards/mini_leaderboard_compilebench.png](../figures/leaderboards/mini_leaderboard_compilebench.png)
+![leaderboards/mini_leaderboard_crustbench.png](../figures/leaderboards/mini_leaderboard_crustbench.png)
+![leaderboards/mini_leaderboard_devopsgym.png](../figures/leaderboards/mini_leaderboard_devopsgym.png)
+![leaderboards/mini_leaderboard_featurebench-modal.png](../figures/leaderboards/mini_leaderboard_featurebench-modal.png)
+![leaderboards/mini_leaderboard_gaia.png](../figures/leaderboards/mini_leaderboard_gaia.png)
+![leaderboards/mini_leaderboard_gpqa-diamond.png](../figures/leaderboards/mini_leaderboard_gpqa-diamond.png)
+![leaderboards/mini_leaderboard_gso.png](../figures/leaderboards/mini_leaderboard_gso.png)
+![leaderboards/mini_leaderboard_humanevalfix.png](../figures/leaderboards/mini_leaderboard_humanevalfix.png)
+![leaderboards/mini_leaderboard_ineqmath.png](../figures/leaderboards/mini_leaderboard_ineqmath.png)
+![leaderboards/mini_leaderboard_kumo.png](../figures/leaderboards/mini_leaderboard_kumo.png)
+![leaderboards/mini_leaderboard_labbench.png](../figures/leaderboards/mini_leaderboard_labbench.png)
+![leaderboards/mini_leaderboard_lawbench.png](../figures/leaderboards/mini_leaderboard_lawbench.png)
+![leaderboards/mini_leaderboard_livecodebench.png](../figures/leaderboards/mini_leaderboard_livecodebench.png)
+![leaderboards/mini_leaderboard_medagentbench.png](../figures/leaderboards/mini_leaderboard_medagentbench.png)
+![leaderboards/mini_leaderboard_mmau.png](../figures/leaderboards/mini_leaderboard_mmau.png)
+![leaderboards/mini_leaderboard_mmmlu.png](../figures/leaderboards/mini_leaderboard_mmmlu.png)
+![leaderboards/mini_leaderboard_omnimath.png](../figures/leaderboards/mini_leaderboard_omnimath.png)
+![leaderboards/mini_leaderboard_qcircuitbench.png](../figures/leaderboards/mini_leaderboard_qcircuitbench.png)
+![leaderboards/mini_leaderboard_reasoning-gym.png](../figures/leaderboards/mini_leaderboard_reasoning-gym.png)
+![leaderboards/mini_leaderboard_replicationbench.png](../figures/leaderboards/mini_leaderboard_replicationbench.png)
+![leaderboards/mini_leaderboard_seal0.png](../figures/leaderboards/mini_leaderboard_seal0.png)
+![leaderboards/mini_leaderboard_simpleqa.png](../figures/leaderboards/mini_leaderboard_simpleqa.png)
+![leaderboards/mini_leaderboard_sldbench.png](../figures/leaderboards/mini_leaderboard_sldbench.png)
+![leaderboards/mini_leaderboard_spider2.png](../figures/leaderboards/mini_leaderboard_spider2.png)
+![leaderboards/mini_leaderboard_strongreject.png](../figures/leaderboards/mini_leaderboard_strongreject.png)
+![leaderboards/mini_leaderboard_swe-lancer.png](../figures/leaderboards/mini_leaderboard_swe-lancer.png)
+![leaderboards/mini_leaderboard_swebench-multilingual.png](../figures/leaderboards/mini_leaderboard_swebench-multilingual.png)
+![leaderboards/mini_leaderboard_swebench-verified.png](../figures/leaderboards/mini_leaderboard_swebench-verified.png)
+![leaderboards/mini_leaderboard_swebenchpro.png](../figures/leaderboards/mini_leaderboard_swebenchpro.png)
+![leaderboards/mini_leaderboard_swesmith.png](../figures/leaderboards/mini_leaderboard_swesmith.png)
+![leaderboards/mini_leaderboard_swtbench.png](../figures/leaderboards/mini_leaderboard_swtbench.png)
+![leaderboards/mini_leaderboard_usaco.png](../figures/leaderboards/mini_leaderboard_usaco.png)
+![leaderboards/mini_leaderboards_cluster_1_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_1_page_1.png)
+![leaderboards/mini_leaderboards_cluster_2_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_2_page_1.png)
+![leaderboards/mini_leaderboards_cluster_3_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_3_page_1.png)
+![leaderboards/mini_leaderboards_cluster_4_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_1.png)
+![leaderboards/mini_leaderboards_cluster_4_page_2.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_2.png)
+![leaderboards/mini_leaderboards_cluster_4_page_3.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_3.png)
+![leaderboards/mini_leaderboards_cluster_4_page_4.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_4.png)
+![leaderboards/mini_leaderboards_cluster_4_page_5.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_5.png)
+![leaderboards/mini_leaderboards_cluster_4_page_6.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_6.png)
+![leaderboards/mini_leaderboards_cluster_4_page_7.png](../figures/leaderboards/mini_leaderboards_cluster_4_page_7.png)
+![leaderboards/mini_leaderboards_cluster_5_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_5_page_1.png)
+![leaderboards/mini_leaderboards_cluster_5_page_2.png](../figures/leaderboards/mini_leaderboards_cluster_5_page_2.png)
+![leaderboards/mini_leaderboards_cluster_6_page_1.png](../figures/leaderboards/mini_leaderboards_cluster_6_page_1.png)
+![task_level/task_best_representatives.png](../figures/task_level/task_best_representatives.png)
+![task_level/task_hard_to_predict_ranked.png](../figures/task_level/task_hard_to_predict_ranked.png)
+![task_level/task_reliable_difficulty_composition.png](../figures/task_level/task_reliable_difficulty_composition.png)
+![task_level/task_reliable_difficulty_composition_percent.png](../figures/task_level/task_reliable_difficulty_composition_percent.png)
+![task_level/task_similarity_benchmark_pair_heatmap.png](../figures/task_level/task_similarity_benchmark_pair_heatmap.png)
+![task_level/task_to_benchmark_alignment.png](../figures/task_level/task_to_benchmark_alignment.png)
 
 ## Not Completed Yet
 

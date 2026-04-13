@@ -4,7 +4,7 @@
 
 The filtering table is now evidence-based on the task-first pipeline: benchmark scores come from task-SVD aggregates, while the missingness columns describe how much original task evidence supported each aggregate before filling.
 
-![Benchmark uniqueness after coverage filtering](../figures/benchmark_uniqueness_vs_coverage.png)
+![Benchmark uniqueness after coverage filtering](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
 
 | benchmark | include_in_key_analysis | observed_count | task_cell_missing_fraction |
 | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ The filtering table is now evidence-based on the task-first pipeline: benchmark 
 
 This is the clean answer to the agent-vs-model question: make the broad statement from the overall fixed-effect decomposition, then qualify it with per-benchmark partial R2 rather than collapsing everything into a single agent+model row label.
 
-![Per-benchmark model vs agent explanatory power](../figures/benchmark_model_vs_agent_role.png)
+![Per-benchmark model vs agent explanatory power](../figures/benchmark_level/benchmark_model_vs_agent_role.png)
 
 | benchmark | model_partial_r2_over_agent | agent_partial_r2_over_model | dominant_dimension |
 | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ This is the clean answer to the agent-vs-model question: make the broad statemen
 
 The Terminus table should be read as a harnessing-effect estimate: the paired comparison holds model fixed where the same model appears under Terminus and another agent.
 
-![Agent lift vs terminus by model](../figures/terminus_delta_by_model_heatmap.png)
+![Agent lift vs terminus by model](../figures/benchmark_level/terminus_delta_by_model_heatmap.png)
 
 | agent | mean_delta_vs_terminus | win_rate_vs_terminus | compared_models |
 | --- | --- | --- | --- |
@@ -50,7 +50,7 @@ The Terminus table should be read as a harnessing-effect estimate: the paired co
 
 The benchmark-predictability result is deliberately separate from clustering: regression asks whether other benchmarks reconstruct a target, while the heatmap shows score-profile similarity. Use both when deciding whether two benchmarks are redundant.
 
-![Clustered benchmark similarity heatmap](../figures/benchmark_similarity_clustered_heatmap.png)
+![Clustered benchmark similarity heatmap](../figures/benchmark_level/benchmark_similarity_clustered_heatmap.png)
 
 | benchmark | cv_r2_from_other_included_benchmarks | cv_rmse |
 | --- | --- | --- |
@@ -67,9 +67,9 @@ The benchmark-predictability result is deliberately separate from clustering: re
 
 The representative-task score now uses leave-one-out aggregate correlation times task variance, so tasks that are merely typical but non-discriminative are less likely to dominate the selected base set.
 
-![Hard-to-predict reliable tasks](../figures/task_hard_to_predict_ranked.png)
+![Hard-to-predict reliable tasks](../figures/task_level/task_hard_to_predict_ranked.png)
 
-![Best representative task per benchmark](../figures/task_best_representatives.png)
+![Best representative task per benchmark](../figures/task_level/task_best_representatives.png)
 
 | benchmark | task_id | task_unpredictability_score | difficulty_tier |
 | --- | --- | --- | --- |
@@ -97,7 +97,7 @@ The representative-task score now uses leave-one-out aggregate correlation times
 
 The HaborMix scorer is no longer centered on moderate difficulty. It first takes useful representative base tasks, then adds difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks without a per-benchmark cap.
 
-![HaborMix selection diagnostics](../figures/harbormix_selection_diagnostics.png)
+![HaborMix selection diagnostics](../figures/harbormix/harbormix_selection_diagnostics.png)
 
 | benchmark | difficulty_tier | selected_tasks | mean_selection_score |
 | --- | --- | --- | --- |
@@ -116,7 +116,7 @@ The HaborMix scorer is no longer centered on moderate difficulty. It first takes
 
 This table is diagnostic rather than a gate. Weak alignment means the reliable bounded subset may not proxy the full task-derived aggregate well; it does not automatically remove the benchmark from the benchmark-level analysis.
 
-![Task aggregate vs benchmark score alignment](../figures/task_to_benchmark_alignment.png)
+![Task aggregate vs benchmark score alignment](../figures/task_level/task_to_benchmark_alignment.png)
 
 | benchmark | n_reliable_bounded_tasks | spearman_agent_model_correlation | alignment_quality |
 | --- | --- | --- | --- |
