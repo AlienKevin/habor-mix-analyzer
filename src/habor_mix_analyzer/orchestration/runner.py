@@ -23,7 +23,7 @@ from ..core import (
 )
 from ..preprocessing.svd_imputation import (
     aggregate_task_result_to_benchmarks,
-    svd_impute_dataframe,
+    validated_impute_dataframe,
     write_benchmark_aggregate_outputs,
     write_matrix_outputs,
 )
@@ -208,10 +208,10 @@ def load_imputation_result(prefix: str):
         raise FileNotFoundError(f"Missing {diagnostics_path}; run `habor-analyze impute` first.")
     diagnostics = json.loads(diagnostics_path.read_text())
     return ImputationResult(
-        normalized=pd.read_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_normalized_matrix.csv"),
-        raw=pd.read_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_matrix.csv"),
+        normalized=pd.read_csv(PROCESSED_DIR / f"{prefix}_imputed_normalized_matrix.csv"),
+        raw=pd.read_csv(PROCESSED_DIR / f"{prefix}_imputed_matrix.csv"),
         stats=pd.read_csv(PROCESSED_DIR / f"{prefix}_column_quality.csv"),
-        cv=pd.read_csv(PROCESSED_DIR / f"{prefix}_svd_rank_cv.csv"),
+        cv=pd.read_csv(PROCESSED_DIR / f"{prefix}_imputation_cv.csv"),
         best_rank=int(diagnostics["best_rank"]),
         missing_fraction=float(diagnostics["missing_fraction"]),
     )
@@ -235,18 +235,19 @@ def run_imputation_step() -> None:
     log("impute: reading raw benchmark and task matrices")
     ensure_output_dirs()
     raw_benchmark, raw_task = read_raw_matrices()
-    log("impute: fitting task-level SVD imputer")
-    task_result = svd_impute_dataframe(
+    log("impute: fitting task-level imputer with held-out validation")
+    task_result = validated_impute_dataframe(
         raw_task,
-        ranks=[2, 4, 6, 8, 10, 12, 16, 20],
+        ranks=[2],
         holdout_fraction=0.05,
         seed=RANDOM_SEED,
     )
-    log("impute: aggregating SVD-filled task matrix into benchmark scores")
+    log(f"impute: selected task imputer={task_result.cv.iloc[0]['method']} rank={task_result.best_rank}")
+    log("impute: aggregating filled task matrix into benchmark scores")
     benchmark_result = aggregate_task_result_to_benchmarks(raw_benchmark, raw_task, task_result)
     write_benchmark_aggregate_outputs(benchmark_result, task_result)
     write_matrix_outputs("task", task_result)
-    log("impute: wrote processed task SVD and benchmark-from-task-aggregate matrices")
+    log("impute: wrote processed task-imputed and benchmark-from-task-aggregate matrices")
 
 
 def run_intermediate_step() -> dict[str, pd.DataFrame]:

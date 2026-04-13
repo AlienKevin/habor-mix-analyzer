@@ -54,6 +54,9 @@ def write_key_analysis_reports(
     task_predictability = study_tables["task_predictability_ranked"]
     selected_tasks = study_tables["harbormix_selected_tasks"]
     selection_by_benchmark = study_tables["harbormix_selection_by_benchmark"]
+    task_imputation_cv = task_result.cv.sort_values(["mae", "rmse", "rank"], na_position="last").copy()
+    best_task_imputer = str(task_imputation_cv.iloc[0]["method"])
+    best_task_rank = int(task_imputation_cv.iloc[0]["rank"])
 
     excluded = filter_table[~filter_table["include_in_key_analysis"]]
     redundant_high = redundancy[redundancy["spearman"] >= 0.75].sort_values("spearman", ascending=False)
@@ -67,8 +70,19 @@ def write_key_analysis_reports(
     ).sort_values("absolute_role_gap", ascending=False)
     hard_tasks = task_predictability.sort_values("task_unpredictability_score", ascending=False)
     representative_top = representative_tasks.sort_values("useful_representativeness_score", ascending=False)
+    predictable_benchmarks = uniqueness.sort_values("cv_r2_from_other_included_benchmarks", ascending=False)
+    story_unique_benchmarks = ", ".join(unique_low["benchmark"].head(5).tolist())
+    story_predictable_benchmarks = ", ".join(predictable_benchmarks["benchmark"].head(5).tolist())
+    story_hard_tasks = ", ".join((hard_tasks["benchmark"] + "/" + hard_tasks["task_id"]).head(3).tolist())
+    story_representative_tasks = ", ".join(
+        (representative_top["benchmark"] + "/" + representative_top["task_id"]).head(3).tolist()
+    )
+    selected_tiers = selected_tasks["difficulty_tier"].value_counts().to_dict()
+    selected_tier_summary = ", ".join(f"{tier}: {count}" for tier, count in selected_tiers.items())
     key_tables = sorted(str(path.relative_to(KEY_TABLE_DIR)) for path in KEY_TABLE_DIR.rglob("*.csv"))
-    key_figures = sorted(str(path.relative_to(KEY_FIGURE_DIR)) for path in KEY_FIGURE_DIR.rglob("*.png"))
+    all_key_figures = sorted(str(path.relative_to(KEY_FIGURE_DIR)) for path in KEY_FIGURE_DIR.rglob("*.png"))
+    key_figures = [name for name in all_key_figures if not name.startswith("leaderboards/per_benchmark/")]
+    per_benchmark_leaderboard_count = len(all_key_figures) - len(key_figures)
     code_files = [
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'core')}/`",
         f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'preprocessing' / 'svd_imputation.py')}`",
@@ -99,12 +113,13 @@ def write_key_analysis_reports(
         f"- Key analysis figures: `{md_path(KEY_FIGURE_DIR)}/`",
         "- Layered table groups: `benchmark_level/`, `leaderboards/`, `task_level/`, `harbormix/`, and `provenance/`.",
         "- Layered figure groups: `benchmark_level/`, `leaderboards/`, `task_level/`, and `harbormix/`.",
+        "- Leaderboard figures are further layered into `leaderboards/per_benchmark/` and `leaderboards/clustered/`; the report embeds only the clustered pages to keep reading compact.",
         f"- Intermediate study outputs: `{md_path(INTERMEDIATE_STUDY_DIR)}/`",
         f"- Intermediate imputed matrices and diagnostics: `{md_path(PROCESSED_DIR)}/`",
         "",
-        "The current preprocessing contract is task-first: task scores are SVD-filled, then benchmark scores are aggregated from the filled task matrix. The original benchmark matrix is retained as metadata and as a sanity check, but benchmark scores are not SVD-filled directly.",
+        "The current preprocessing contract is task-first: task scores are filled first, then benchmark scores are aggregated from the filled task matrix. The original benchmark matrix is retained as metadata and as a sanity check, but benchmark scores are not imputed directly.",
         "",
-        "BenchPress mapping note: Dimitris's BenchPress repo treats benchmark prediction as an explicit analysis problem, compares benchmark-regression and SVD families under held-out validation, and uses a blend because regression can be more accurate while SVD gives broader coverage. Our schema is task-rich rather than model-benchmark-only, so we map that lesson by using task-SVD for coverage, benchmark/task predictability tables for difficulty ranking, and task aggregate alignment as a diagnostic rather than blindly trusting every aggregate.",
+        "BenchPress mapping note: Dimitris's BenchPress repo treats benchmark prediction as an explicit analysis problem, compares benchmark-regression and SVD families under held-out validation, and uses a blend because regression can be more accurate while SVD gives broader coverage. Our schema is task-rich rather than model-benchmark-only, so we map that lesson by validating several task-fill families on held-out observed cells, using benchmark/task predictability tables for difficulty ranking, and keeping task aggregate alignment as a diagnostic rather than blindly trusting every aggregate.",
         "",
         "Data provenance for the main studies:",
         "",
@@ -112,22 +127,32 @@ def write_key_analysis_reports(
         "",
         "Preprocessing diagnostics:",
         "",
-        "Task imputation method: each score column is robustly centered and scaled after `log1p` for nonnegative unbounded columns; task SVD rank is selected by held-out observed-cell cross-validation; missing task cells are filled by iterative low-rank SVD reconstruction; observed task cells are restored exactly; filled task scores are inverse-transformed and clipped to the observed range of that task. Benchmark scores are then calculated as per-benchmark means across those task scores. Task-level imputation remains less stable than dense benchmark tables because the task matrix is much wider and sparser, so task conclusions are restricted to reliable bounded non-degenerate tasks.",
+        f"Task imputation method: each score column is robustly centered and scaled after `log1p` for nonnegative unbounded columns. The pipeline compares column-median, row-mean shrinkage, two-way shrinkage, and low-rank iterative SVD candidates on held-out observed cells, then uses the lowest-MAE method. For this run the selected task imputer is `{best_task_imputer}` with rank {best_task_rank}. Observed task cells are restored exactly; filled task scores are inverse-transformed and clipped to the observed range of that task. Benchmark scores are then calculated as per-benchmark means across those task scores. Task-level imputation remains less stable than dense benchmark tables because the task matrix is much wider and sparser, so task conclusions are restricted to reliable bounded non-degenerate tasks.",
         "",
         *markdown_table(
             imputation_diagnostics,
             [
                 "matrix",
                 "preprocessing_method",
+                "selected_imputation_method",
                 "missing_fraction_before_processing",
-                "selected_svd_rank",
-                "task_svd_rank_used_for_benchmark_aggregation",
+                "selected_imputation_rank",
+                "task_imputation_method_used_for_benchmark_aggregation",
+                "task_imputation_rank_used_for_benchmark_aggregation",
                 "holdout_cells",
                 "holdout_rmse_scaled_score_space",
                 "holdout_mae_scaled_score_space",
             ],
             4,
         ),
+        "",
+        "Held-out task imputation comparison:",
+        "",
+        *markdown_table(task_imputation_cv, ["method", "rank", "holdout_cells", "rmse", "mae"], 10),
+        "",
+        "Interpretation: the task matrix is sparse and very wide, so this is a validation-backed fill, not ground truth. The aggregate benchmark table is more stable than individual filled cells because it averages over many task columns, but sparse benchmarks should still be read with their task-cell missingness fields.",
+        "",
+        "Reliability conclusion: SVD is not automatically the right fill here. In this run, low-rank SVD improves RMSE because it reduces a few large scaled errors, but it loses on MAE, which is the better primary criterion for this mixed-scale sparse matrix because many robust-normalized task columns have outlier-sensitive tails. The selected column-median fill is therefore intentionally conservative: it preserves each task's observed center and avoids hallucinating row-level structure where the held-out cells do not support it.",
         "",
         "## Research Question Coverage Checklist",
         "",
@@ -137,13 +162,13 @@ def write_key_analysis_reports(
         "| BenchPress-style benchmark predictability and hard-to-predict benchmarks/tasks | covered | `tables/benchmark_level/benchmark_uniqueness_filtered.csv`, `tables/task_level/task_predictability_ranked.csv`, benchmark/task predictability figures |",
         "| Benchmark/task similarity and clustering | covered | `tables/benchmark_level/benchmark_similarity_clusters.csv`, `tables/task_level/task_cross_benchmark_similarity.csv`, clustered heatmaps |",
         "| Representative tasks per benchmark | covered | `tables/task_level/task_representative_tasks.csv`, `figures/task_level/task_best_representatives.png` |",
-        "| Mini-leaderboards grouped by similar benchmarks | covered | `tables/leaderboards/benchmark_mini_leaderboards.csv`, `figures/leaderboards/mini_leaderboards_cluster_*.png` |",
+        "| Mini-leaderboards grouped by similar benchmarks | covered | `tables/leaderboards/benchmark_mini_leaderboards.csv`, `figures/leaderboards/clustered/mini_leaderboards_cluster_*.png` |",
         "| Agent harness improvements over Terminus | covered | `tables/benchmark_level/benchmark_agent_lift_vs_terminus.csv`, `tables/benchmark_level/terminus_delta_by_model.csv`, Terminus heatmaps |",
         "| Quantitative HaborMix task selection | covered | `tables/harbormix/harbormix_selected_tasks.csv`, `tables/harbormix/harbormix_selection_by_benchmark.csv`, `figures/harbormix/harbormix_selection_diagnostics.png` |",
         "",
         "## Study 1: Coverage Filtering",
         "",
-        "**Method:** Benchmark-level claims use benchmark aggregates derived from the task-SVD matrix, but coverage filtering still uses evidence metadata: at least 15 agent+model rows need some observed task evidence for that benchmark, and the missingness fields describe coverage before task-SVD filling. This filter keeps the key analysis story from leaning too heavily on filled task values.",
+        "**Method:** Benchmark-level claims use benchmark aggregates derived from the filled task matrix, but coverage filtering still uses evidence metadata: at least 15 agent+model rows need some observed task evidence for that benchmark, and the missingness fields describe coverage before task filling. This filter keeps the key analysis story from leaning too heavily on filled task values.",
         "",
         "**Code files:**",
         *code_files,
@@ -154,7 +179,7 @@ def write_key_analysis_reports(
         "**Result overview and analysis:**",
         f"- Included {len(included_benchmarks)} of {len(filter_table)} benchmarks.",
         f"- Excluded sparse benchmarks: {', '.join(excluded['benchmark'].tolist())}.",
-        f"- Benchmark scores are task aggregates, not direct benchmark-SVD outputs; pre-aggregation benchmark missing fraction was {benchmark_result.missing_fraction:.3f}.",
+        f"- Benchmark scores are task aggregates, not direct benchmark-imputation outputs; pre-aggregation benchmark missing fraction was {benchmark_result.missing_fraction:.3f}.",
         "",
         *markdown_table(filter_table, ["benchmark", "include_in_key_analysis", "observed_count", "missing_fraction", "task_cell_missing_fraction"], 12),
         "",
@@ -191,7 +216,7 @@ def write_key_analysis_reports(
         "",
         "## Study 3: Agent+Model Leaderboards",
         "",
-        "**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Per-benchmark mini-leaderboards use benchmark scores aggregated from SVD-filled tasks on each benchmark's original metric scale. Each mini-leaderboard shows all available agent+model rows, grouped by model with colored bars for agents, so the same plot makes model differences and agent harness differences visible. The aggregate top-agent plot uses mean within-benchmark score percentile, because averaging scores across benchmarks with different scales would be misleading.",
+        "**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Per-benchmark mini-leaderboards use benchmark scores aggregated from filled tasks on each benchmark's original metric scale. Each mini-leaderboard shows all available agent+model rows, grouped by model with colored bars for agents, so the same plot makes model differences and agent harness differences visible. The aggregate top-agent plot uses mean within-benchmark score percentile, because averaging scores across benchmarks with different scales would be misleading.",
         "",
         "**Code files:**",
         *code_files,
@@ -201,7 +226,8 @@ def write_key_analysis_reports(
         f"- `{md_path(key_table_path('benchmark_scores_long'))}`",
         f"- `{md_path(key_table_path('benchmark_mini_leaderboards'))}`",
         f"- `{md_path(key_table_path('benchmark_similarity_clusters'))}`",
-        f"- `{md_path(KEY_FIGURE_DIR / 'leaderboards' / 'mini_leaderboards_cluster_*.png')}`",
+        f"- `{md_path(KEY_FIGURE_DIR / 'leaderboards' / 'clustered' / 'mini_leaderboards_cluster_*.png')}`",
+        f"- `{md_path(KEY_FIGURE_DIR / 'leaderboards' / 'per_benchmark' / 'mini_leaderboard_*.png')}`",
         "",
         report_image("leaderboards/benchmark_agent_model_top_scores.png", "Top agent+model pairs on included benchmarks"),
         "",
@@ -214,7 +240,7 @@ def write_key_analysis_reports(
         "",
         "## Study 4: Benchmark Predictability and Similarity",
         "",
-        "**Method:** Following the BenchPress idea, each included benchmark is predicted from the other included benchmarks using ridge regression with cross-validation over agent+model rows. Low or negative R2 means the benchmark is hard to reconstruct from the rest and likely contributes distinct information. Benchmark similarity uses Spearman correlation of agent+model score profiles and hierarchical clustering.",
+        "**Method:** Following the BenchPress idea, each included benchmark is predicted from the other included benchmarks using ridge regression with cross-validation over agent+model rows. Low or negative R2 means the benchmark is hard to reconstruct from the rest and likely contributes distinct information. Benchmark similarity uses same-dimensional vectors: every benchmark is represented by its score profile across the same agent+model rows, and clustering is run on `1 - |Spearman correlation|` so benchmarks with similar ranking behavior sit together even if one is directionally inverted.",
         "",
         "**Code files:**",
         *code_files,
@@ -237,9 +263,11 @@ def write_key_analysis_reports(
         "",
         "**Insight and findings:** Predictable benchmarks are candidates for compression; hard-to-predict benchmarks should be preserved when the goal is behavioral breadth. Similarity clusters are also the basis for the grouped mini-leaderboards.",
         "",
+        f"Paper-facing read: the least reconstructable benchmark set starts with {story_unique_benchmarks}. These are the strongest candidates to preserve when reducing the suite because other benchmark scores do not explain them well. In contrast, the most predictable benchmarks start with {story_predictable_benchmarks}; these are not useless, but they are where compression or cluster-level reporting is easiest to justify.",
+        "",
         "## Study 5: Task Similarity, Predictability, and Representatives",
         "",
-        "**Method:** Task-level analysis uses reliable, bounded, non-degenerate tasks only. A task is hard to predict when its maximum absolute Spearman correlation to peer tasks in the same benchmark is low. Representativeness is no longer pure correlation with the benchmark aggregate: I compute a leave-one-out aggregate correlation and multiply it by observed cross-agent/model variance, so redundant but low-discrimination tasks no longer dominate. Within- and cross-benchmark task similarity use median absolute task-profile correlations. Difficulty tiers use mean task score thresholds: frontier <5%, hard 5-30%, medium 30-70%, easy 70-95%, saturated >95%.",
+        "**Method:** Task-level analysis uses reliable, bounded, non-degenerate tasks only. Task similarity also uses same-dimensional vectors: every task is represented by its filled, standardized score profile across the same agent+model rows. A task is hard to predict when its maximum absolute profile correlation to peer tasks in the same benchmark is low. Representativeness is no longer pure correlation with the benchmark aggregate: I compute a leave-one-out aggregate correlation and multiply it by observed cross-agent/model variance, so redundant but low-discrimination tasks no longer dominate. Within- and cross-benchmark task similarity use median absolute task-profile correlations, with at most the most discriminative 40 tasks sampled per benchmark for cross-benchmark pair summaries. Difficulty tiers use mean task score thresholds: frontier <5%, hard 5-30%, medium 30-70%, easy 70-95%, saturated >95%.",
         "",
         "**Code files:**",
         *code_files,
@@ -267,6 +295,8 @@ def write_key_analysis_reports(
         *markdown_table(task_similarity, ["benchmark", "n_reliable_tasks", "median_abs_task_similarity_within_benchmark"], 10),
         "",
         "**Insight and findings:** Task predictability and useful representativeness are different objectives. Representative tasks are the base set for predicting benchmark aggregates; hard-to-predict and difficult tasks are additional stress tests for broad coverage.",
+        "",
+        f"Paper-facing read: the hardest-to-predict task examples begin with {story_hard_tasks}. The most useful representative task examples begin with {story_representative_tasks}. That split is the main reason HaborMix should not be selected from one scalar alone: a task can be representative without being unique, and a unique task can be too idiosyncratic to stand in for its benchmark.",
         "",
         "## Study 6: Terminus Harnessing Effects",
         "",
@@ -317,6 +347,8 @@ def write_key_analysis_reports(
         "",
         "**Insight and findings:** HaborMix selection is quantitative and auditable: representative tasks anchor the minimal benchmark-prediction base, while difficult and unique/unpredictable tasks add breadth.",
         "",
+        f"Paper-facing read: the final {len(selected_tasks)}-task set is intentionally not just a hard-task list. Its difficulty composition is {selected_tier_summary}. The base representative set keeps each included benchmark anchored to its aggregate behavior, while the diversity-aware fill adds difficult, frontier, and uniquely informative items.",
+        "",
         "## Study 8: Task Aggregate vs Benchmark-Level Score Alignment",
         "",
         "**Method:** For each benchmark, I average benchmark-relative task scores and correlate that aggregate with the benchmark-level benchmark-relative score across agent+model rows. This is intentionally diagnostic rather than a hard gate: the new benchmark score is already the task aggregate, so this table mainly identifies benchmarks where reliable bounded tasks alone do or do not track the full task-derived benchmark aggregate.",
@@ -336,7 +368,13 @@ def write_key_analysis_reports(
         "",
         "## Cross-Study Story",
         "",
-        "The emerging story is that benchmark diversity matters more than a single aggregate leaderboard. Coverage filtering removes sparse columns from the main benchmark-level claims. Within the retained benchmarks, model identity is usually more explanatory than agent identity, but agent effects vary sharply by model and benchmark. BenchPress-style predictability analysis finds benchmarks that are redundant enough to compress and benchmarks that add distinct signal. The task-level layer then answers a different question: which items are representative, which are hard to predict, and which form a balanced HaborMix candidate set. Terminus paired deltas are the fairest current way to talk about harness improvement.",
+        "The emerging story is that benchmark diversity matters more than a single aggregate leaderboard. Coverage filtering removes sparse columns from the main benchmark-level claims, and the imputation diagnostic makes the same point from the preprocessing side: the data are dense only after filling, and the selected fill is conservative because held-out validation did not justify stronger SVD structure by MAE.",
+        "",
+        "Within the retained benchmarks, model identity is usually more explanatory than agent identity, but the per-benchmark partial-R2 view prevents overstatement: some benchmark slices are much more sensitive to harness choice than the overall decomposition suggests. That is why the report keeps descriptive `agent+model` leaderboards for browsing, but uses paired Terminus deltas when making harness claims.",
+        "",
+        f"The BenchPress-style predictability layer identifies a preservation/compression axis. Benchmarks such as {story_unique_benchmarks} are hard to reconstruct and therefore carry distinctive signal. Benchmarks such as {story_predictable_benchmarks} are easier to reconstruct and can be grouped more aggressively. The clustered heatmaps and clustered mini-leaderboards give the visual version of the same argument.",
+        "",
+        "The task layer answers a different selection problem. Representative tasks are useful as small proxies for benchmark aggregates; unpredictable and difficult tasks are useful as stress tests. HaborMix combines those roles by taking representative base tasks first, then filling with difficult, unique, and discriminative tasks until the final compact set reaches the target size range. That is the clearest story for why HaborMix is not merely a random subset, not merely a hard subset, and not merely a redundant set of benchmark prototypes.",
         "",
         "## Artifact Index",
         "",
@@ -344,7 +382,8 @@ def write_key_analysis_reports(
         *[f"- `{md_path(KEY_TABLE_DIR / name)}`" for name in key_tables],
         "",
         "All key analysis figures:",
-        *[report_image(name, name) for name in key_figures],
+        *[f"- `{md_path(KEY_FIGURE_DIR / name)}`" for name in key_figures],
+        f"- `{md_path(KEY_FIGURE_DIR / 'leaderboards' / 'per_benchmark')}/` ({per_benchmark_leaderboard_count} per-benchmark mini-leaderboard files, listed by directory rather than expanded here)",
         "",
         "## Not Completed Yet",
         "",
@@ -358,9 +397,15 @@ def write_key_analysis_reports(
     findings_lines = [
         "# Key Findings for Key Analysis Drafting",
         "",
+        f"0. The processed benchmark matrix is task-first and uses `{best_task_imputer}` task filling, not direct benchmark imputation.",
+        "",
+        "Benchmark scores are simple means over the filled task matrix. The imputation reliability check compares candidate task fillers on held-out observed cells; SVD has lower RMSE here but higher MAE, so the selected fill is conservative rather than low-rank.",
+        "",
+        *markdown_table(task_imputation_cv, ["method", "rank", "holdout_cells", "rmse", "mae"], 5),
+        "",
         f"1. Use {len(included_benchmarks)} coverage-filtered benchmarks for benchmark-level claims; keep sparse benchmarks in appendix/provisional analysis.",
         "",
-        "The filtering table is now evidence-based on the task-first pipeline: benchmark scores come from task-SVD aggregates, while the missingness columns describe how much original task evidence supported each aggregate before filling.",
+        "The filtering table is now evidence-based on the task-first pipeline: benchmark scores come from filled-task aggregates, while the missingness columns describe how much original task evidence supported each aggregate before filling.",
         "",
         report_image("benchmark_level/benchmark_uniqueness_vs_coverage.png", "Benchmark predictability ranking"),
         "",

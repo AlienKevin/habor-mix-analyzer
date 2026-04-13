@@ -104,11 +104,15 @@ def choose_holdout(mask: np.ndarray, fraction: float, seed: int) -> np.ndarray:
 def iterative_svd_impute(
     matrix: np.ndarray,
     rank: int,
-    max_iter: int = 80,
+    initial_fill: np.ndarray | None = None,
+    max_iter: int = 3,
     tolerance: float = 1e-5,
 ) -> np.ndarray:
     observed = np.isfinite(matrix)
-    filled = np.where(observed, matrix, 0.0)
+    if initial_fill is None:
+        filled = np.where(observed, matrix, 0.0)
+    else:
+        filled = np.where(observed, matrix, initial_fill)
     missing = ~observed
     if not missing.any():
         return filled
@@ -116,9 +120,9 @@ def iterative_svd_impute(
     rank = max(1, min(rank, min(matrix.shape) - 1))
     previous_missing = filled[missing].copy()
     for _ in range(max_iter):
-        u, singular_values, vt = np.linalg.svd(filled, full_matrices=False)
-        reconstructed = (u[:, :rank] * singular_values[:rank]) @ vt[:rank, :]
+        reconstructed = low_rank_reconstruct(filled, rank)
         filled[missing] = reconstructed[missing]
+        clip_missing_to_observed_range(filled, matrix)
         delta = np.linalg.norm(filled[missing] - previous_missing)
         denom = np.linalg.norm(previous_missing) + 1e-9
         if delta / denom < tolerance:
@@ -128,7 +132,87 @@ def iterative_svd_impute(
     return filled
 
 
-def cross_validate_rank(
+def low_rank_reconstruct(matrix: np.ndarray, rank: int) -> np.ndarray:
+    gram = matrix @ matrix.T
+    eigenvalues, eigenvectors = np.linalg.eigh(gram)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+    singular_values = np.sqrt(np.maximum(eigenvalues[:rank], 0))
+    u = eigenvectors[:, :rank]
+    return (u * singular_values) @ ((u.T @ matrix) / np.maximum(singular_values[:, None], 1e-12))
+
+
+def clip_missing_to_observed_range(filled: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    missing = ~np.isfinite(reference)
+    if not missing.any():
+        return filled
+    finite = np.isfinite(reference)
+    has_observed = finite.any(axis=0)
+    if not has_observed.any():
+        return filled
+    col_min = np.where(has_observed, np.where(finite, reference, np.inf).min(axis=0), -np.inf)
+    col_max = np.where(has_observed, np.where(finite, reference, -np.inf).max(axis=0), np.inf)
+    clipped = np.minimum(np.maximum(filled, col_min), col_max)
+    clipped_mask = missing & has_observed[None, :]
+    filled[clipped_mask] = clipped[clipped_mask]
+    return filled
+
+
+def column_median_impute(matrix: np.ndarray) -> np.ndarray:
+    observed = np.isfinite(matrix)
+    filled = np.where(observed, matrix, 0.0)
+    return clip_missing_to_observed_range(filled, matrix)
+
+
+def row_mean_shrunk_impute(matrix: np.ndarray, shrinkage: float = 5.0) -> np.ndarray:
+    observed = np.isfinite(matrix)
+    row_counts = observed.sum(axis=1).astype(float)
+    row_sums = np.where(observed, matrix, 0.0).sum(axis=1)
+    row_means = np.divide(row_sums, row_counts, out=np.zeros_like(row_sums), where=row_counts > 0)
+    weights = row_counts / (row_counts + shrinkage)
+    fill = weights[:, None] * row_means[:, None]
+    filled = np.where(observed, matrix, fill)
+    return clip_missing_to_observed_range(filled, matrix)
+
+
+def two_way_shrunk_impute(matrix: np.ndarray, row_shrinkage: float = 5.0, col_shrinkage: float = 5.0) -> np.ndarray:
+    observed = np.isfinite(matrix)
+    row_counts = observed.sum(axis=1).astype(float)
+    row_sums = np.where(observed, matrix, 0.0).sum(axis=1)
+    row_means = np.divide(row_sums, row_counts, out=np.zeros_like(row_sums), where=row_counts > 0)
+    row_weights = row_counts / (row_counts + row_shrinkage)
+
+    col_counts = observed.sum(axis=0).astype(float)
+    col_sums = np.where(observed, matrix, 0.0).sum(axis=0)
+    col_means = np.divide(col_sums, col_counts, out=np.zeros_like(col_sums), where=col_counts > 0)
+    col_weights = col_counts / (col_counts + col_shrinkage)
+
+    fill = row_weights[:, None] * row_means[:, None] + col_weights[None, :] * col_means[None, :]
+    filled = np.where(observed, matrix, fill)
+    return clip_missing_to_observed_range(filled, matrix)
+
+
+def impute_by_method(matrix: np.ndarray, method: str, rank: int | None = None) -> np.ndarray:
+    if method == "column_median":
+        return column_median_impute(matrix)
+    if method == "row_mean_shrunk":
+        return row_mean_shrunk_impute(matrix)
+    if method == "two_way_shrunk":
+        return two_way_shrunk_impute(matrix)
+    if method == "iterative_svd":
+        if rank is None:
+            raise ValueError("iterative_svd requires a rank.")
+        return iterative_svd_impute(matrix, rank=rank)
+    if method == "two_way_initialized_svd":
+        if rank is None:
+            raise ValueError("two_way_initialized_svd requires a rank.")
+        initial = two_way_shrunk_impute(matrix)
+        return iterative_svd_impute(matrix, rank=rank, initial_fill=initial)
+    raise ValueError(f"Unknown imputation method: {method}")
+
+
+def cross_validate_imputers(
     normalized: pd.DataFrame,
     ranks: list[int],
     holdout_fraction: float,
@@ -139,19 +223,26 @@ def cross_validate_rank(
     holdout = choose_holdout(observed, holdout_fraction, seed)
     train = matrix.copy()
     train[holdout] = np.nan
-    records: list[dict[str, float | int]] = []
-    for rank in ranks:
-        imputed = iterative_svd_impute(train, rank=rank)
+    records: list[dict[str, float | int | str]] = []
+    method_grid: list[tuple[str, int]] = [
+        ("column_median", 0),
+        ("row_mean_shrunk", 0),
+        ("two_way_shrunk", 0),
+    ]
+    method_grid.extend(("iterative_svd", rank) for rank in ranks)
+    for method, rank in method_grid:
+        imputed = impute_by_method(train, method=method, rank=rank or None)
         errors = imputed[holdout] - matrix[holdout]
         records.append(
             {
+                "method": method,
                 "rank": rank,
                 "holdout_cells": int(holdout.sum()),
                 "rmse": float(np.sqrt(np.mean(errors**2))),
                 "mae": float(np.mean(np.abs(errors))),
             }
         )
-    return pd.DataFrame(records).sort_values(["rmse", "rank"]).reset_index(drop=True)
+    return pd.DataFrame(records).sort_values(["mae", "rmse", "method", "rank"]).reset_index(drop=True)
 
 
 def denormalize(
@@ -175,7 +266,7 @@ def denormalize(
     return raw
 
 
-def svd_impute_dataframe(
+def validated_impute_dataframe(
     df: pd.DataFrame,
     ranks: list[int],
     holdout_fraction: float,
@@ -184,9 +275,14 @@ def svd_impute_dataframe(
     values = df[score_columns(df)].astype(float)
     stats = robust_column_stats(values)
     normalized = normalize(values, stats)
-    cv = cross_validate_rank(normalized, ranks, holdout_fraction, seed)
+    cv = cross_validate_imputers(normalized, ranks, holdout_fraction, seed)
+    best_method = str(cv.iloc[0]["method"])
     best_rank = int(cv.iloc[0]["rank"])
-    imputed_normalized_array = iterative_svd_impute(normalized.to_numpy(dtype=float), rank=best_rank)
+    imputed_normalized_array = impute_by_method(
+        normalized.to_numpy(dtype=float),
+        method=best_method,
+        rank=best_rank or None,
+    )
     imputed_normalized = pd.DataFrame(imputed_normalized_array, columns=values.columns, index=values.index)
     imputed_raw = denormalize(imputed_normalized, values, stats)
     return ImputationResult(
@@ -197,6 +293,9 @@ def svd_impute_dataframe(
         best_rank=best_rank,
         missing_fraction=float(values.isna().mean().mean()),
     )
+
+
+svd_impute_dataframe = validated_impute_dataframe
 
 
 def aggregate_task_result_to_benchmarks(
@@ -243,7 +342,8 @@ def aggregate_task_result_to_benchmarks(
     cv = pd.DataFrame(
         [
             {
-                "method": "task_svd_then_benchmark_aggregate",
+                "method": "task_imputation_then_benchmark_aggregate",
+                "task_imputation_method": str(task_result.cv.iloc[0]["method"]),
                 "rank": int(task_result.best_rank),
                 "holdout_cells": 0,
                 "rmse": np.nan,
@@ -262,12 +362,14 @@ def aggregate_task_result_to_benchmarks(
 
 
 def write_matrix_outputs(prefix: str, result: ImputationResult) -> None:
-    result.raw.to_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_matrix.csv", index=False)
-    result.normalized.to_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_normalized_matrix.csv", index=False)
+    best = result.cv.iloc[0]
+    result.raw.to_csv(PROCESSED_DIR / f"{prefix}_imputed_matrix.csv", index=False)
+    result.normalized.to_csv(PROCESSED_DIR / f"{prefix}_imputed_normalized_matrix.csv", index=False)
     result.stats.to_csv(PROCESSED_DIR / f"{prefix}_column_quality.csv", index=False)
-    result.cv.to_csv(PROCESSED_DIR / f"{prefix}_svd_rank_cv.csv", index=False)
+    result.cv.to_csv(PROCESSED_DIR / f"{prefix}_imputation_cv.csv", index=False)
     diagnostics = {
         "matrix": prefix,
+        "method": str(best["method"]),
         "best_rank": result.best_rank,
         "missing_fraction": result.missing_fraction,
         "columns": int(result.raw.shape[1] - len(KEY_COLUMNS)),
@@ -285,8 +387,9 @@ def write_benchmark_aggregate_outputs(result: ImputationResult, task_result: Imp
     result.cv.to_csv(PROCESSED_DIR / "benchmark_from_task_aggregate_diagnostics_cv.csv", index=False)
     diagnostics = {
         "matrix": "benchmark",
-        "method": "task_svd_then_benchmark_aggregate",
-        "task_svd_rank": task_result.best_rank,
+        "method": "task_imputation_then_benchmark_aggregate",
+        "task_imputation_method": str(task_result.cv.iloc[0]["method"]),
+        "task_imputation_rank": task_result.best_rank,
         "missing_fraction_before_task_aggregation": result.missing_fraction,
         "columns": int(result.raw.shape[1] - len(KEY_COLUMNS)),
         "agent_model_rows": int(result.raw.shape[0]),

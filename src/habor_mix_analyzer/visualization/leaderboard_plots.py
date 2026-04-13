@@ -123,10 +123,9 @@ def benchmark_mini_leaderboard_tables_and_figures(
                 )
                 single_fig.tight_layout()
                 safe_benchmark = benchmark.replace("/", "_").replace(" ", "_")
-                single_filename = f"leaderboards/mini_leaderboard_{safe_benchmark}.png"
+                single_filename = f"leaderboards/per_benchmark/mini_leaderboard_{safe_benchmark}.png"
                 save_key_figure(single_fig, single_filename)
                 plt.close(single_fig)
-                figure_paths.append(single_filename)
             for ax in axes_flat[len(page_benchmarks) :]:
                 ax.axis("off")
             fig.suptitle(
@@ -136,7 +135,7 @@ def benchmark_mini_leaderboard_tables_and_figures(
                 fontsize=16,
             )
             fig.tight_layout(rect=(0, 0, 1, 0.96))
-            filename = f"leaderboards/mini_leaderboards_cluster_{cluster_id}_page_{page_idx}.png"
+            filename = f"leaderboards/clustered/mini_leaderboards_cluster_{cluster_id}_page_{page_idx}.png"
             save_key_figure(fig, filename)
             plt.close(fig)
             figure_paths.append(filename)
