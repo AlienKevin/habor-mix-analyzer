@@ -57,3 +57,49 @@ Okay seems better. Here are some comments:
     - We should be able to get mini-leaderboards for each benchmark, and then plot agent-model performances accordingly. We can place this leaderboard graph in groups to generate several figures, each consist of several similar benchmarks (similar in domains? agent model scores? you decide)
     - Terminus is the fair comparison across all models - how does each agent harness "improves" over terminus?
     - How did we select harbor-mix? Is there some quantitative measurements that we can use and visualize to help select?
+
+---
+
+Several more comments:
+1. I think the analyzer code could be further decoupled. Now the naming is very weird and I can't infer from the name what hte analysis is doing and what they covered. Let' smake it in a more finagrained structure
+2. Confirm for me that you are using the SVD-filled dataset to conduct the entire analysis. Also, tell me how you use SVD to fill the data and how reasonable are the data.
+3. You don't need to emphasize raw if you are using raw scores.
+4. Check again to see if you have addressed all these questions:
+    - `agent` and `model`: which plays a more significant role? Overall vs. per benchmark? Would this relationship vary across benchmarks?
+    - BenchPress tells us that benchmark scores are predictable for a lot of benchmarks. How does this apply to our scenario? Which benchmarks are hard to predict? What tasks are hard to predict? How do you know? Can you rank them quantitively?
+    - How similar are benchmarks to each other? How similar are tasks within a benchmark similar to each other? How similar are tasks across benchmarks? Maybe we can have some good clustering techniques and visualization to demontrate these?
+    - What tasks best represent a benchmark? In terms of scores, difficulty, etc.?
+    - We should be able to get mini-leaderboards for each benchmark, and then plot agent-model performances accordingly. We can place this leaderboard graph in groups to generate several figures, each consist of several similar benchmarks (similar in domains? agent model scores? you decide)
+    - Terminus is the fair comparison across all models - how does each agent harness "improves" over terminus?
+    - How did we select harbor-mix? Is there some quantitative measurements that we can use and visualize to help select?
+    If not or you feel like there are additional analyses that could help, you should add them. Critically think if you are doing the right analysis and using the right approach
+5. The definition of difficulty is unclear from the fig. Let's maybe specify in the legend?
+6. Make sure you check the figures and tables after they get generated to ensure they are ready for paper.
+
+---
+
+More comments:
+1. [From bot]: HaborMix scorer is structurally circular. The "reward moderate difficulty" term will always exclude
+frontier and saturated items, forever, regardless of how much data arrives. Replace it with a        
+discrimination term (cross-system variance) or stratify the per-benchmark cap across difficulty tiers.
+This is an algorithmic choice, not a sample-size artifact.
+    - While I am not fully convinced by the suggestion from the bot, it's worth re-looking at your harbor mix choice. Remember we want to select the difficult tasks + the tasks the best represent the benchmark datasets + the tasks that are most unique and unpredicatable. These are all super important dimensions of the task when choosing them.
+2. [From bot]: Representativeness metric confounds "typical" with "useful". Correlation-with-aggregate-only means
+an internally redundant benchmark (240 similar tasks) will always produce top-scoring representatives 
+that don't discriminate systems. Multiply by task variance, or reformulate as "task that best predicts
+the benchmark aggregate via leave-one-out regression." Independent of n.  
+3. [From bot]: Study 8 alignment is computed but not used. If it's intended to stay informational, fine — but make
+that a documented choice. If it's supposed to gate downstream task analyses, wire it through as a    
+parameterized threshold. Right now it sits in a table and that's it.
+    - I am not sure if this is reasonable, but worth double check
+4. [bot + human]: The minileaderboard should be made in a better way
+    - Should show all the agent+ model combinations we had. It's okay for it to be long and big
+    - I prefer the columns to be model names, and each model should have two bars together, each with a different color. Each color represents an agent. That way, we can clearly visualize the impact of agent vs model. This should apply to each individual leaderboard. The legend should show how color maps to agents
+5. [human] difficulty composition chart's ticks is center aligned, but because benchmark names are long, this is actually hard to tell. I prefer letting the end of work mapping to the ticks. Also, for that graph, percentage should further be used rather than task count (that way I think all bars should be top-bottom full) - this gives us a better sense of the distribution - you should keep both charts. 
+6. [human] https://github.com/anadim/llm-benchmark-matrix . This is the dimitris BenchPress source repo. Please check it out to see what he did for analysis. While we are having a different data schema, his lessons are great to learn and see how we can map benchpress to our analysis framework
+7. [human] key_findings.md is to minimal! Again, use referred graphs to demonstrate the findings and isnsights.
+8. [human] Your analysis_story.md should be more in detail and ensure all the analysis you have conducgted, all the figures and tables you generated are all been used. That way we can see the full story.
+9. [human] For each modular analysis, appropriate logs should be outputed to tell progress. Feel free to use tqdm as well if applicable, but you dont necessarily need to use it.
+10. [human] The name `paper` is weird to use, especially together with `studies`. Maybe use `key_analyses` and `intermediate_studies` instead? Or if you have better naming, feel free to use.
+11. [human] pipeline.py should be named to main.py for clarity.
+12. [human] There's no max-task cap for habor-mix selection per benchmark. We just want the most difficult + representative + unique / unpredicatable tasks. But you should include those "base" tasks to predict other benchmark scores right? Otherwise it won't become reprensentative. Let's prioritize representative for a minimal number, then add the most difficult + unique ones.
