@@ -4,7 +4,7 @@ from ..core import *
 
 
 def _task_composition_inputs(task_summary: pd.DataFrame) -> tuple[pd.DataFrame, list[str], dict[str, str], list[str]]:
-    tier_cols = [col for col in ["hard", "medium", "easy", "frontier", "saturated"] if col in task_summary.columns]
+    tier_cols = [col for col in ["frontier", "hard", "medium", "easy", "saturated"] if col in task_summary.columns]
     plot_df = task_summary.sort_values("candidate_pool_tasks", ascending=False).head(25).set_index("benchmark")
     tier_labels = {
         "frontier": "frontier (<5% mean score)",
@@ -13,7 +13,7 @@ def _task_composition_inputs(task_summary: pd.DataFrame) -> tuple[pd.DataFrame, 
         "easy": "easy (70-95%)",
         "saturated": "saturated (>95%)",
     }
-    colors = ["#74c476", "#9ecae1", "#fdd0a2", "#c7e9c0", "#fdae6b"]
+    colors = ["#c7e9c0", "#74c476", "#9ecae1", "#fdd0a2", "#fdae6b"]
     return plot_df, tier_cols, tier_labels, colors
 
 
@@ -167,7 +167,7 @@ def save_harbormix_selection_plot(selected_tasks: pd.DataFrame) -> None:
     counts = selected_tasks["benchmark"].value_counts().sort_values()
     axes[0].barh(counts.index, counts.values, color="#9ecae1", edgecolor="white")
     axes[0].tick_params(axis="y", labelsize=10)
-    axes[0].set_title("Selected HaborMix Candidate Tasks by Benchmark")
+    axes[0].set_title("Final HaborMix Tasks by Benchmark")
     axes[0].set_xlabel("Selected task count")
     axes[0].set_ylabel("")
     reason_counts = (

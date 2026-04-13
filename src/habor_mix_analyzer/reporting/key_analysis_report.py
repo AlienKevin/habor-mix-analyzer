@@ -15,7 +15,7 @@ KEY_TABLE_SUBDIRS = {
     "task_cross_benchmark_similarity": "task_level",
     "task_representative_tasks": "task_level",
     "task_predictability_ranked": "task_level",
-    "harbormix_candidate_tasks": "harbormix",
+    "harbormix_selected_tasks": "harbormix",
     "harbormix_selection_by_benchmark": "harbormix",
     "terminus_delta_by_model": "benchmark_level",
 }
@@ -52,7 +52,7 @@ def write_key_analysis_reports(
     task_cross_similarity = study_tables["task_cross_benchmark_similarity"]
     representative_tasks = study_tables["task_representative_tasks"]
     task_predictability = study_tables["task_predictability_ranked"]
-    selected_tasks = study_tables["harbormix_candidate_tasks"]
+    selected_tasks = study_tables["harbormix_selected_tasks"]
     selection_by_benchmark = study_tables["harbormix_selection_by_benchmark"]
 
     excluded = filter_table[~filter_table["include_in_key_analysis"]]
@@ -139,7 +139,7 @@ def write_key_analysis_reports(
         "| Representative tasks per benchmark | covered | `tables/task_level/task_representative_tasks.csv`, `figures/task_level/task_best_representatives.png` |",
         "| Mini-leaderboards grouped by similar benchmarks | covered | `tables/leaderboards/benchmark_mini_leaderboards.csv`, `figures/leaderboards/mini_leaderboards_cluster_*.png` |",
         "| Agent harness improvements over Terminus | covered | `tables/benchmark_level/benchmark_agent_lift_vs_terminus.csv`, `tables/benchmark_level/terminus_delta_by_model.csv`, Terminus heatmaps |",
-        "| Quantitative HaborMix task selection | covered | `tables/harbormix/harbormix_candidate_tasks.csv`, `tables/harbormix/harbormix_selection_by_benchmark.csv`, `figures/harbormix/harbormix_selection_diagnostics.png` |",
+        "| Quantitative HaborMix task selection | covered | `tables/harbormix/harbormix_selected_tasks.csv`, `tables/harbormix/harbormix_selection_by_benchmark.csv`, `figures/harbormix/harbormix_selection_diagnostics.png` |",
         "",
         "## Study 1: Coverage Filtering",
         "",
@@ -293,14 +293,15 @@ def write_key_analysis_reports(
         "",
         "## Study 7: HaborMix Selection",
         "",
-        "**Method:** Candidate tasks must be reliable and bounded. HaborMix selection now has no max-task cap per benchmark. It first includes a small base set of useful representative tasks per benchmark, then adds difficult tasks and unique/unpredictable tasks. The composite score combines useful representativeness, difficulty, unique/unpredictable signal, and cross-agent/model discrimination; it no longer excludes frontier or saturated items by construction.",
+        "**Method:** Candidate tasks must be reliable and bounded. The final HaborMix selection targets a compact 100-200 task set, currently 160 tasks. It first includes a small base set of useful representative tasks per benchmark, then fills the remaining slots with a diversity-aware ranking over difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks. The composite score combines useful representativeness, difficulty, unique/unpredictable signal, and cross-agent/model discrimination; it no longer excludes frontier or saturated items by construction. The broader scored pool is retained under intermediate studies for auditability.",
         "",
         "**Code files:**",
         *code_files,
         "",
         "**Result paths:**",
-        f"- `{md_path(key_table_path('harbormix_candidate_tasks'))}`",
+        f"- `{md_path(key_table_path('harbormix_selected_tasks'))}`",
         f"- `{md_path(key_table_path('harbormix_selection_by_benchmark'))}`",
+        f"- `{md_path(TASK_INTERMEDIATE_STUDY_DIR / 'harbormix_scored_task_pool.csv')}`",
         f"- `{md_path(TASK_INTERMEDIATE_STUDY_DIR / 'task_frontier_or_saturated_watchlist.csv')}`",
         "",
         report_image("harbormix/harbormix_selection_diagnostics.png", "HaborMix selection diagnostics"),
@@ -312,7 +313,7 @@ def write_key_analysis_reports(
         "**Result overview and analysis:**",
         *markdown_table(selection_by_benchmark, ["benchmark", "difficulty_tier", "selected_tasks", "mean_selection_score", "mean_representative_signal", "mean_unique_unpredictable_signal", "mean_difficulty_signal"], 14),
         "",
-        f"- Selected {len(selected_tasks)} diversified candidate tasks.",
+        f"- Selected {len(selected_tasks)} final HaborMix tasks from the broader scored candidate pool.",
         "",
         "**Insight and findings:** HaborMix selection is quantitative and auditable: representative tasks anchor the minimal benchmark-prediction base, while difficult and unique/unpredictable tasks add breadth.",
         "",
@@ -401,9 +402,9 @@ def write_key_analysis_reports(
         "",
         *markdown_table(representative_top, ["benchmark", "task_id", "useful_representativeness_score", "difficulty_tier"], 8),
         "",
-        f"6. The current task-level filter yields {len(selected_tasks)} diversified candidate tasks for HaborMix-style selection.",
+        f"6. The current HaborMix final set contains {len(selected_tasks)} diversified tasks.",
         "",
-        "The HaborMix scorer is no longer centered on moderate difficulty. It first takes useful representative base tasks, then adds difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks without a per-benchmark cap.",
+        "The HaborMix scorer is no longer centered on moderate difficulty. It first takes useful representative base tasks, then fills to a compact target size with difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks.",
         "",
         report_image("harbormix/harbormix_selection_diagnostics.png", "HaborMix selection diagnostics"),
         "",

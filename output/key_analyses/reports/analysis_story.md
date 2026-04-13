@@ -47,7 +47,7 @@ Task imputation method: each score column is robustly centered and scaled after 
 | Representative tasks per benchmark | covered | `tables/task_level/task_representative_tasks.csv`, `figures/task_level/task_best_representatives.png` |
 | Mini-leaderboards grouped by similar benchmarks | covered | `tables/leaderboards/benchmark_mini_leaderboards.csv`, `figures/leaderboards/mini_leaderboards_cluster_*.png` |
 | Agent harness improvements over Terminus | covered | `tables/benchmark_level/benchmark_agent_lift_vs_terminus.csv`, `tables/benchmark_level/terminus_delta_by_model.csv`, Terminus heatmaps |
-| Quantitative HaborMix task selection | covered | `tables/harbormix/harbormix_candidate_tasks.csv`, `tables/harbormix/harbormix_selection_by_benchmark.csv`, `figures/harbormix/harbormix_selection_diagnostics.png` |
+| Quantitative HaborMix task selection | covered | `tables/harbormix/harbormix_selected_tasks.csv`, `tables/harbormix/harbormix_selection_by_benchmark.csv`, `figures/harbormix/harbormix_selection_diagnostics.png` |
 
 ## Study 1: Coverage Filtering
 
@@ -462,7 +462,7 @@ Benchmarks with strongest within-benchmark task similarity:
 
 ## Study 7: HaborMix Selection
 
-**Method:** Candidate tasks must be reliable and bounded. HaborMix selection now has no max-task cap per benchmark. It first includes a small base set of useful representative tasks per benchmark, then adds difficult tasks and unique/unpredictable tasks. The composite score combines useful representativeness, difficulty, unique/unpredictable signal, and cross-agent/model discrimination; it no longer excludes frontier or saturated items by construction.
+**Method:** Candidate tasks must be reliable and bounded. The final HaborMix selection targets a compact 100-200 task set, currently 160 tasks. It first includes a small base set of useful representative tasks per benchmark, then fills the remaining slots with a diversity-aware ranking over difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks. The composite score combines useful representativeness, difficulty, unique/unpredictable signal, and cross-agent/model discrimination; it no longer excludes frontier or saturated items by construction. The broader scored pool is retained under intermediate studies for auditability.
 
 **Code files:**
 - `src/habor_mix_analyzer/core/`
@@ -483,8 +483,9 @@ Benchmarks with strongest within-benchmark task similarity:
 - `src/habor_mix_analyzer/cli.py`
 
 **Result paths:**
-- `output/key_analyses/tables/harbormix/harbormix_candidate_tasks.csv`
+- `output/key_analyses/tables/harbormix/harbormix_selected_tasks.csv`
 - `output/key_analyses/tables/harbormix/harbormix_selection_by_benchmark.csv`
+- `output/intermediate_studies/task_level/harbormix_scored_task_pool.csv`
 - `output/intermediate_studies/task_level/task_frontier_or_saturated_watchlist.csv`
 
 ![HaborMix selection diagnostics](../figures/harbormix/harbormix_selection_diagnostics.png)
@@ -496,22 +497,22 @@ Benchmarks with strongest within-benchmark task similarity:
 **Result overview and analysis:**
 | benchmark | difficulty_tier | selected_tasks | mean_selection_score | mean_representative_signal | mean_unique_unpredictable_signal | mean_difficulty_signal |
 | --- | --- | --- | --- | --- | --- | --- |
-| featurebench-modal | hard | 121 | 0.612 | 0.528 | 0.507 | 0.854 |
-| labbench | hard | 86 | 0.558 | 0.478 | 0.491 | 0.814 |
-| arc-agi-2 | hard | 79 | 0.616 | 0.555 | 0.492 | 0.851 |
-| algotune | hard | 59 | 0.614 | 0.480 | 0.603 | 0.830 |
-| featurebench-modal | frontier | 55 | 0.343 | 0.073 | 0.201 | 0.982 |
-| swebench-multilingual | hard | 53 | 0.499 | 0.153 | 0.781 | 0.843 |
-| gaia | hard | 52 | 0.534 | 0.410 | 0.488 | 0.835 |
-| aider-polyglot | hard | 47 | 0.496 | 0.234 | 0.541 | 0.849 |
-| lawbench | medium | 46 | 0.551 | 0.496 | 0.711 | 0.449 |
-| aider-polyglot | medium | 45 | 0.686 | 0.733 | 0.716 | 0.502 |
-| algotune | frontier | 45 | 0.333 | 0.070 | 0.140 | 0.985 |
-| replicationbench | hard | 40 | 0.607 | 0.610 | 0.389 | 0.839 |
-| seal0 | hard | 36 | 0.533 | 0.312 | 0.602 | 0.849 |
-| lawbench | hard | 34 | 0.447 | 0.202 | 0.620 | 0.788 |
+| aider-polyglot | medium | 5 | 0.740 | 0.888 | 0.656 | 0.535 |
+| arc-agi-2 | hard | 4 | 0.799 | 0.949 | 0.533 | 0.770 |
+| livecodebench | medium | 4 | 0.789 | 0.860 | 0.860 | 0.532 |
+| replicationbench | hard | 4 | 0.750 | 0.894 | 0.436 | 0.766 |
+| humanevalfix | easy | 4 | 0.690 | 0.929 | 0.814 | 0.083 |
+| featurebench-modal | medium | 3 | 0.813 | 0.954 | 0.716 | 0.623 |
+| algotune | hard | 3 | 0.790 | 0.754 | 0.783 | 0.772 |
+| gpqa-diamond | medium | 3 | 0.786 | 0.837 | 0.901 | 0.519 |
+| mmmlu | hard | 3 | 0.767 | 0.672 | 0.846 | 0.785 |
+| spider2 | medium | 3 | 0.762 | 0.938 | 0.656 | 0.555 |
+| bixbench | medium | 3 | 0.748 | 0.956 | 0.640 | 0.467 |
+| omnimath | medium | 3 | 0.726 | 0.860 | 0.772 | 0.475 |
+| medagentbench | medium | 3 | 0.714 | 0.911 | 0.655 | 0.391 |
+| labbench | hard | 3 | 0.711 | 0.854 | 0.344 | 0.794 |
 
-- Selected 1941 diversified candidate tasks.
+- Selected 160 final HaborMix tasks from the broader scored candidate pool.
 
 **Insight and findings:** HaborMix selection is quantitative and auditable: representative tasks anchor the minimal benchmark-prediction base, while difficult and unique/unpredictable tasks add breadth.
 
@@ -578,7 +579,7 @@ All key analysis tables:
 - `output/key_analyses/tables/benchmark_level/benchmark_uniqueness_filtered.csv`
 - `output/key_analyses/tables/benchmark_level/benchmark_variance_decomposition_filtered.csv`
 - `output/key_analyses/tables/benchmark_level/terminus_delta_by_model.csv`
-- `output/key_analyses/tables/harbormix/harbormix_candidate_tasks.csv`
+- `output/key_analyses/tables/harbormix/harbormix_selected_tasks.csv`
 - `output/key_analyses/tables/harbormix/harbormix_selection_by_benchmark.csv`
 - `output/key_analyses/tables/leaderboards/benchmark_agent_model_scores.csv`
 - `output/key_analyses/tables/leaderboards/benchmark_mini_leaderboards.csv`

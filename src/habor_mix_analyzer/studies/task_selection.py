@@ -59,7 +59,8 @@ def select_harbormix_tasks(
     representative_tasks: pd.DataFrame,
     task_predictability: pd.DataFrame,
     base_representatives_per_benchmark: int = 2,
-) -> pd.DataFrame:
+    target_total_tasks: int = 160,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     rep_cols = [
         "benchmark",
         "task_column",
@@ -123,35 +124,78 @@ def select_harbormix_tasks(
             reasons.append("high_composite")
         return ";".join(reasons)
 
-    eligible["selection_reason"] = eligible.apply(reason, axis=1)
-    selected = eligible[eligible["selection_reason"] != ""].copy()
+    eligible["candidate_reason"] = eligible.apply(reason, axis=1)
+    eligible["is_harbormix_candidate_pool"] = eligible["candidate_reason"] != ""
+    eligible["final_priority_score"] = (
+        eligible["mix_selection_score"]
+        + 0.06 * eligible["base_representative_task"].astype(float)
+        + 0.04 * eligible["difficult_task"].astype(float)
+        + 0.04 * eligible["frontier_task_with_signal"].astype(float)
+        + 0.04 * eligible["unique_unpredictable_task"].astype(float)
+    )
+
+    candidate_pool = eligible[eligible["is_harbormix_candidate_pool"]].copy()
+    base = candidate_pool[candidate_pool["base_representative_task"]].copy()
+    base = base.sort_values(
+        ["benchmark", "representative_rank_within_benchmark", "final_priority_score"],
+        ascending=[True, True, False],
+    )
+    selected_indices = list(base.index[:target_total_tasks])
+
+    remaining_slots = max(0, target_total_tasks - len(selected_indices))
+    if remaining_slots:
+        fill_pool = candidate_pool[~candidate_pool.index.isin(selected_indices)].copy()
+        fill_pool["fill_rank_within_benchmark"] = fill_pool.groupby("benchmark")["final_priority_score"].rank(
+            ascending=False, method="first"
+        )
+        fill_pool = fill_pool.sort_values(
+            ["fill_rank_within_benchmark", "final_priority_score", "benchmark"],
+            ascending=[True, False, True],
+        )
+        selected_indices.extend(fill_pool.head(remaining_slots).index.tolist())
+
+    selected = eligible.loc[selected_indices].copy()
+    selected["selection_stage"] = np.where(selected["base_representative_task"], "representative_base", "diverse_fill")
+    selected["selection_reason"] = selected["candidate_reason"]
     selected = selected.sort_values(
-        ["benchmark", "base_representative_task", "mix_selection_score"],
-        ascending=[True, False, False],
+        ["selection_stage", "final_priority_score", "benchmark"],
+        ascending=[False, False, True],
     ).reset_index(drop=True)
     selected["selection_rank"] = np.arange(1, len(selected) + 1)
-    return selected[
-        [
-            "selection_rank",
-            "benchmark",
-            "task_id",
-            "task_column",
-            "selection_reason",
-            "mix_selection_score",
-            "difficulty_tier",
-            "difficulty_signal",
-            "representative_signal",
-            "unique_unpredictable_signal",
-            "discrimination_signal",
-            "observed_count",
-            "imputed_mean",
-            "observed_mean",
-            "observed_std",
-            "strength_correlation",
-            "useful_representativeness_score",
-            "task_unpredictability_score",
-            "representative_rank_within_benchmark",
-            "unique_rank_within_benchmark",
-            "composite_rank_within_benchmark",
-        ]
+    candidate_pool = candidate_pool.sort_values(
+        ["benchmark", "base_representative_task", "final_priority_score"],
+        ascending=[True, False, False],
+    ).reset_index(drop=True)
+    candidate_pool["pool_rank"] = np.arange(1, len(candidate_pool) + 1)
+
+    columns = [
+        "benchmark",
+        "task_id",
+        "task_column",
+        "candidate_reason",
+        "mix_selection_score",
+        "final_priority_score",
+        "difficulty_tier",
+        "difficulty_signal",
+        "representative_signal",
+        "unique_unpredictable_signal",
+        "discrimination_signal",
+        "observed_count",
+        "imputed_mean",
+        "observed_mean",
+        "observed_std",
+        "strength_correlation",
+        "useful_representativeness_score",
+        "task_unpredictability_score",
+        "representative_rank_within_benchmark",
+        "unique_rank_within_benchmark",
+        "composite_rank_within_benchmark",
+        "base_representative_task",
+        "difficult_task",
+        "frontier_task_with_signal",
+        "unique_unpredictable_task",
+        "high_composite_task",
     ]
+    selected_columns = ["selection_rank", "selection_stage", "selection_reason", *columns]
+    pool_columns = ["pool_rank", *columns]
+    return selected[selected_columns], candidate_pool[pool_columns]

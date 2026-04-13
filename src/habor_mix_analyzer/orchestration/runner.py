@@ -115,7 +115,7 @@ KEY_ANALYSIS_TABLES = [
     "task_cross_benchmark_similarity",
     "task_representative_tasks",
     "task_predictability_ranked",
-    "harbormix_candidate_tasks",
+    "harbormix_selected_tasks",
     "harbormix_selection_by_benchmark",
 ]
 
@@ -131,7 +131,7 @@ KEY_TABLE_SUBDIRS = {
     "task_cross_benchmark_similarity": "task_level",
     "task_representative_tasks": "task_level",
     "task_predictability_ranked": "task_level",
-    "harbormix_candidate_tasks": "harbormix",
+    "harbormix_selected_tasks": "harbormix",
     "harbormix_selection_by_benchmark": "harbormix",
     "terminus_delta_by_model": "benchmark_level",
 }
@@ -300,8 +300,8 @@ def build_study_tables(
     task_within_similarity, representative_tasks, task_predictability, task_cross_similarity = task_similarity_and_representatives(
         task_result, tasks_enriched, benchmark_clusters
     )
-    log("studies: selecting HaborMix candidate tasks")
-    selected_tasks = select_harbormix_tasks(tasks_enriched, representative_tasks, task_predictability)
+    log("studies: selecting final HaborMix task set")
+    selected_tasks, scored_task_pool = select_harbormix_tasks(tasks_enriched, representative_tasks, task_predictability)
     selected_task_summary = (
         selected_tasks.groupby(["benchmark", "difficulty_tier"])
         .agg(
@@ -349,7 +349,8 @@ def build_study_tables(
         "task_cross_benchmark_similarity": task_cross_similarity,
         "task_representative_tasks": representative_tasks,
         "task_predictability_ranked": task_predictability,
-        "harbormix_candidate_tasks": selected_tasks,
+        "harbormix_selected_tasks": selected_tasks,
+        "harbormix_scored_task_pool": scored_task_pool,
         "harbormix_selection_by_benchmark": selected_task_summary,
         "task_frontier_or_saturated_watchlist": frontier_tasks,
     }
@@ -395,7 +396,7 @@ def write_study_figures(study_tables: dict[str, pd.DataFrame]) -> None:
     )
     save_task_predictability_plot(study_tables["task_predictability_ranked"])
     save_representative_task_plot(study_tables["task_representative_tasks"])
-    save_harbormix_selection_plot(study_tables["harbormix_candidate_tasks"])
+    save_harbormix_selection_plot(study_tables["harbormix_selected_tasks"])
 
 
 def run_studies_step() -> None:

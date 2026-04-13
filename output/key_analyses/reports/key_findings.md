@@ -93,24 +93,24 @@ The representative-task score now uses leave-one-out aggregate correlation times
 | labbench | labbench-figqa-0128 | 0.436 | medium |
 | swebench-multilingual | swebench-multilingual-jqlang__jq-2919 | 0.432 | easy |
 
-6. The current task-level filter yields 1941 diversified candidate tasks for HaborMix-style selection.
+6. The current HaborMix final set contains 160 diversified tasks.
 
-The HaborMix scorer is no longer centered on moderate difficulty. It first takes useful representative base tasks, then adds difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks without a per-benchmark cap.
+The HaborMix scorer is no longer centered on moderate difficulty. It first takes useful representative base tasks, then fills to a compact target size with difficult, frontier-with-variance, unique/unpredictable, and high-composite tasks.
 
 ![HaborMix selection diagnostics](../figures/harbormix/harbormix_selection_diagnostics.png)
 
 | benchmark | difficulty_tier | selected_tasks | mean_selection_score |
 | --- | --- | --- | --- |
-| featurebench-modal | hard | 121 | 0.612 |
-| labbench | hard | 86 | 0.558 |
-| arc-agi-2 | hard | 79 | 0.616 |
-| algotune | hard | 59 | 0.614 |
-| featurebench-modal | frontier | 55 | 0.343 |
-| swebench-multilingual | hard | 53 | 0.499 |
-| gaia | hard | 52 | 0.534 |
-| aider-polyglot | hard | 47 | 0.496 |
-| lawbench | medium | 46 | 0.551 |
-| aider-polyglot | medium | 45 | 0.686 |
+| aider-polyglot | medium | 5 | 0.740 |
+| arc-agi-2 | hard | 4 | 0.799 |
+| livecodebench | medium | 4 | 0.789 |
+| replicationbench | hard | 4 | 0.750 |
+| humanevalfix | easy | 4 | 0.690 |
+| featurebench-modal | medium | 3 | 0.813 |
+| algotune | hard | 3 | 0.790 |
+| gpqa-diamond | medium | 3 | 0.786 |
+| mmmlu | hard | 3 | 0.767 |
+| spider2 | medium | 3 | 0.762 |
 
 7. Task-to-benchmark alignment should be used as a sanity check before interpreting benchmark-level scores from task-level tables.
 
