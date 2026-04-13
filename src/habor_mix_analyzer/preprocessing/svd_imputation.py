@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .common import *
+from ..core import *
 
 
 def robust_column_stats(values: pd.DataFrame) -> pd.DataFrame:
@@ -53,6 +53,7 @@ def robust_column_stats(values: pd.DataFrame) -> pd.DataFrame:
         )
     return pd.DataFrame(rows)
 
+
 def apply_column_transforms(values: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
     transformed = values.astype(float).copy()
     stat_index = stats.set_index("column")
@@ -60,6 +61,7 @@ def apply_column_transforms(values: pd.DataFrame, stats: pd.DataFrame) -> pd.Dat
         if stat_index.loc[col, "transform"] == "log1p":
             transformed[col] = np.log1p(transformed[col])
     return transformed
+
 
 def invert_column_transforms(values: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
     raw = values.astype(float).copy()
@@ -69,12 +71,14 @@ def invert_column_transforms(values: pd.DataFrame, stats: pd.DataFrame) -> pd.Da
             raw[col] = np.expm1(raw[col])
     return raw
 
+
 def normalize(values: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
     centers = stats.set_index("column")["center"].reindex(values.columns)
     scales = stats.set_index("column")["scale"].reindex(values.columns)
     transformed = apply_column_transforms(values, stats)
     normalized = (transformed - centers) / scales
     return normalized
+
 
 def choose_holdout(mask: np.ndarray, fraction: float, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
@@ -95,6 +99,7 @@ def choose_holdout(mask: np.ndarray, fraction: float, seed: int) -> np.ndarray:
         col_counts[col] -= 1
         held += 1
     return holdout
+
 
 def iterative_svd_impute(
     matrix: np.ndarray,
@@ -122,6 +127,7 @@ def iterative_svd_impute(
     filled[observed] = matrix[observed]
     return filled
 
+
 def cross_validate_rank(
     normalized: pd.DataFrame,
     ranks: list[int],
@@ -147,6 +153,7 @@ def cross_validate_rank(
         )
     return pd.DataFrame(records).sort_values(["rmse", "rank"]).reset_index(drop=True)
 
+
 def denormalize(
     normalized: pd.DataFrame,
     original_values: pd.DataFrame,
@@ -166,6 +173,7 @@ def denormalize(
             missing = ~observed[col]
             raw.loc[missing, col] = raw.loc[missing, col].clip(min_value, max_value)
     return raw
+
 
 def svd_impute_dataframe(
     df: pd.DataFrame,
@@ -190,6 +198,7 @@ def svd_impute_dataframe(
         missing_fraction=float(values.isna().mean().mean()),
     )
 
+
 def write_matrix_outputs(prefix: str, result: ImputationResult) -> None:
     result.raw.to_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_matrix.csv", index=False)
     result.normalized.to_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_normalized_matrix.csv", index=False)
@@ -200,11 +209,12 @@ def write_matrix_outputs(prefix: str, result: ImputationResult) -> None:
         "best_rank": result.best_rank,
         "missing_fraction": result.missing_fraction,
         "columns": int(result.raw.shape[1] - len(KEY_COLUMNS)),
-        "systems": int(result.raw.shape[0]),
+        "agent_model_rows": int(result.raw.shape[0]),
     }
     (PROCESSED_DIR / f"{prefix}_imputation_diagnostics.json").write_text(
         json.dumps(diagnostics, indent=2) + "\n"
     )
+
 
 def singular_value_report(prefix: str, result: ImputationResult) -> pd.DataFrame:
     cols = score_columns(result.normalized)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .common import *
+from ..core import *
 
 
 def write_paper_reports(
@@ -12,6 +12,7 @@ def write_paper_reports(
 ) -> None:
     filter_table = study_tables["benchmark_filtering"]
     provenance = study_tables["analysis_data_provenance"]
+    imputation_diagnostics = study_tables["imputation_diagnostics_summary"]
     agent_model_scores = study_tables["benchmark_agent_model_scores"]
     model_effects = study_tables["benchmark_model_adjusted_effects"]
     agent_effects = study_tables["benchmark_agent_adjusted_effects"]
@@ -44,10 +45,22 @@ def write_paper_reports(
     hard_tasks = task_predictability.sort_values("task_unpredictability_score", ascending=False)
     representative_top = representative_tasks.sort_values("representativeness_score", ascending=False)
     code_files = [
-        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'analysis.py')}`",
-        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'figures.py')}`",
-        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'reports.py')}`",
-        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'pipeline.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'core')}/`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'preprocessing' / 'svd_imputation.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'coverage_filtering.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'intermediate_tables.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'model_agent_roles.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'benchmark_predictability.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'benchmark_similarity.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'leaderboards.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'terminus_comparison.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'task_alignment.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'task_selection.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'task_similarity.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'studies' / 'provenance.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'visualization')}/`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'reporting' / 'paper_report.py')}`",
+        f"- `{md_path(ROOT / 'src' / 'habor_mix_analyzer' / 'cli.py')}`",
     ]
 
     report_lines = [
@@ -62,11 +75,40 @@ def write_paper_reports(
         f"- Expanded study outputs: `{md_path(STUDY_DIR)}/`",
         f"- Intermediate imputed matrices and diagnostics: `{md_path(PROCESSED_DIR)}/`",
         "",
-        "Missingness in this report means original raw-data coverage before SVD filling. The processed SVD matrices are dense; observed-count and missingness columns are retained so we can distinguish measured evidence from model-completed cells.",
+        "All score-based studies consume the SVD-filled processed matrices. Missingness in this report means original input coverage before SVD filling; observed-count and missingness fields are retained as evidence-quality metadata so we can distinguish measured cells from SVD-filled cells.",
         "",
         "Data provenance for the main studies:",
         "",
         *markdown_table(provenance, ["analysis", "primary_matrix", "processed_output"], 10),
+        "",
+        "SVD imputation diagnostics:",
+        "",
+        "Imputation method: each score column is robustly centered and scaled after `log1p` for nonnegative unbounded columns; rank is selected by held-out observed-cell cross-validation; missing cells are filled by iterative low-rank SVD reconstruction; observed input cells are restored exactly; filled scores are inverse-transformed and clipped to the observed range of that column. This is most defensible for benchmark-level analysis after sparse-column filtering. Task-level imputation is less stable because the task matrix is much wider and sparser, so task conclusions are restricted to reliable bounded non-degenerate tasks.",
+        "",
+        *markdown_table(
+            imputation_diagnostics,
+            [
+                "matrix",
+                "missing_fraction_before_svd",
+                "selected_svd_rank",
+                "holdout_cells",
+                "holdout_rmse_scaled_score_space",
+                "holdout_mae_scaled_score_space",
+            ],
+            4,
+        ),
+        "",
+        "## Research Question Coverage Checklist",
+        "",
+        "| Question | Status | Main artifacts |",
+        "| --- | --- | --- |",
+        "| Agent vs model role overall and per benchmark | covered | `benchmark_variance_decomposition_filtered.csv`, `benchmark_model_agent_role_by_benchmark.csv`, `benchmark_model_vs_agent_role.png` |",
+        "| BenchPress-style benchmark predictability and hard-to-predict benchmarks/tasks | covered | `benchmark_uniqueness_filtered.csv`, `task_predictability_ranked.csv`, `benchmark_uniqueness_vs_coverage.png`, `task_hard_to_predict_ranked.png` |",
+        "| Benchmark/task similarity and clustering | covered | `benchmark_similarity_clusters.csv`, `benchmark_correlation_clustered.csv`, `task_within_benchmark_similarity.csv`, `task_cross_benchmark_similarity.csv`, clustered heatmaps |",
+        "| Representative tasks per benchmark | covered | `task_representative_tasks.csv`, `task_best_representatives.png` |",
+        "| Mini-leaderboards grouped by similar benchmarks | covered | `benchmark_mini_leaderboards.csv`, `mini_leaderboards_cluster_*.png` |",
+        "| Agent harness improvements over Terminus | covered | `benchmark_agent_lift_vs_terminus.csv`, `terminus_delta_by_model.csv`, Terminus heatmaps |",
+        "| Quantitative HaborMix task selection | covered | `harbormix_candidate_tasks.csv`, `harbormix_selection_by_benchmark.csv`, `harbormix_selection_diagnostics.png` |",
         "",
         "## Study 1: Coverage Filtering",
         "",
@@ -81,7 +123,7 @@ def write_paper_reports(
         "**Result overview and analysis:**",
         f"- Included {len(included_benchmarks)} of {len(filter_table)} benchmarks.",
         f"- Excluded sparse benchmarks: {', '.join(excluded['benchmark'].tolist())}.",
-        f"- Benchmark matrix imputation used rank {benchmark_result.best_rank}; raw benchmark missing fraction was {benchmark_result.missing_fraction:.3f}.",
+        f"- Benchmark matrix imputation used rank {benchmark_result.best_rank}; original benchmark missing fraction was {benchmark_result.missing_fraction:.3f}.",
         "",
         *markdown_table(filter_table, ["benchmark", "include_in_paper_analysis", "observed_count", "missing_fraction"], 12),
         "",
@@ -118,14 +160,14 @@ def write_paper_reports(
         "",
         "## Study 3: Agent+Model Leaderboards",
         "",
-        "**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Per-benchmark mini-leaderboards use SVD-filled raw benchmark scores on each benchmark's original metric scale. The aggregate top-agent plot uses mean within-benchmark raw-score percentile, because averaging raw scores across benchmarks with different scales would be misleading.",
+        "**Method:** I keep `agent+model` rankings as descriptive mini-leaderboards. Per-benchmark mini-leaderboards use SVD-filled benchmark scores on each benchmark's original metric scale. The aggregate top-agent plot uses mean within-benchmark score percentile, because averaging scores across benchmarks with different scales would be misleading.",
         "",
         "**Code files:**",
         *code_files,
         "",
         "**Result paths:**",
         f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_agent_model_scores.csv')}`",
-        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_raw_scores_long.csv')}`",
+        f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_scores_long.csv')}`",
         f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_mini_leaderboards.csv')}`",
         f"- `{md_path(PAPER_TABLE_DIR / 'benchmark_similarity_clusters.csv')}`",
         f"- `{md_path(PAPER_FIGURE_DIR / 'mini_leaderboards_cluster_*.png')}`",
@@ -135,9 +177,9 @@ def write_paper_reports(
         *[report_image(fig, f"Mini-leaderboards {fig}") for fig in mini_leaderboard_figures],
         "",
         "**Result overview and analysis:**",
-        *markdown_table(agent_model_scores, ["rank", "agent_model", "mean_raw_score_percentile_across_benchmarks", "observed_fraction_on_included_benchmarks"], 10),
+        *markdown_table(agent_model_scores, ["rank", "agent_model", "mean_score_percentile_across_benchmarks", "observed_fraction_on_included_benchmarks"], 10),
         "",
-        "**Insight and findings:** Raw benchmark scores should be read benchmark by benchmark. The percentile aggregate is a compact descriptive ranking only; it is not a causal agent claim because model and agent are entangled in the row identity.",
+        "**Insight and findings:** Benchmark scores should be read benchmark by benchmark. The percentile aggregate is a compact descriptive ranking only; it is not a causal agent claim because model and agent are entangled in the row identity.",
         "",
         "## Study 4: Benchmark Predictability and Similarity",
         "",
@@ -166,7 +208,7 @@ def write_paper_reports(
         "",
         "## Study 5: Task Similarity, Predictability, and Representatives",
         "",
-        "**Method:** Task-level analysis uses reliable, bounded, non-degenerate tasks only. A task is hard to predict when its maximum absolute Spearman correlation to peer tasks in the same benchmark is low. A representative task is one whose score profile correlates strongly with the benchmark's reliable-task aggregate. Within- and cross-benchmark task similarity use median absolute task-profile correlations.",
+        "**Method:** Task-level analysis uses reliable, bounded, non-degenerate tasks only. A task is hard to predict when its maximum absolute Spearman correlation to peer tasks in the same benchmark is low. A representative task is one whose score profile correlates strongly with the benchmark's reliable-task aggregate. Within- and cross-benchmark task similarity use median absolute task-profile correlations. Difficulty tiers use mean task score thresholds: frontier <5%, hard 5-30%, medium 30-70%, easy 70-95%, saturated >95%.",
         "",
         "**Code files:**",
         *code_files,
@@ -185,10 +227,10 @@ def write_paper_reports(
         "",
         "**Result overview and analysis:**",
         "Hardest-to-predict reliable tasks:",
-        *markdown_table(hard_tasks, ["benchmark", "task_id", "task_unpredictability_score", "difficulty_tier", "observed_mean"], 12),
+        *markdown_table(hard_tasks, ["benchmark", "task_id", "task_unpredictability_score", "difficulty_tier", "task_score"], 12),
         "",
         "Most representative tasks:",
-        *markdown_table(representative_top, ["benchmark", "task_id", "representativeness_score", "difficulty_tier", "observed_mean"], 12),
+        *markdown_table(representative_top, ["benchmark", "task_id", "representativeness_score", "difficulty_tier", "task_score"], 12),
         "",
         "Benchmarks with strongest within-benchmark task similarity:",
         *markdown_table(task_similarity, ["benchmark", "n_reliable_tasks", "median_abs_task_similarity_within_benchmark"], 10),

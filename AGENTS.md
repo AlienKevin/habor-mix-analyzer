@@ -11,16 +11,22 @@ This repository contains a `uv`-run analysis pipeline for cross-benchmark agent 
 - Intermediate processed data lives under `data/processed/intermediate/`.
 - Expanded study outputs live under `output/studies/`.
 - Important paper-facing tables, figures, and reports live under `output/paper/`.
-- The CLI orchestrator is `src/habor_mix_analyzer/pipeline.py`; implementation is split across `common.py`, `imputation.py`, `analysis.py`, `figures.py`, and `reports.py`.
+- The CLI entry point is `src/habor_mix_analyzer/cli.py`; `src/habor_mix_analyzer/pipeline.py` is a compatibility wrapper for the installed script.
+- Step orchestration lives in `src/habor_mix_analyzer/orchestration/runner.py`.
+- Shared helpers live in `src/habor_mix_analyzer/core/`.
+- SVD preprocessing lives in `src/habor_mix_analyzer/preprocessing/svd_imputation.py`.
+- Analysis methods are organized by study question under `src/habor_mix_analyzer/studies/`: coverage filtering, model-vs-agent roles, benchmark predictability, benchmark similarity, leaderboards, Terminus comparison, task alignment, task selection, task similarity, and provenance.
+- Paper-facing figure code lives under `src/habor_mix_analyzer/visualization/`.
+- Embedded Markdown reporting lives in `src/habor_mix_analyzer/reporting/paper_report.py`.
 
 ## Data Assumptions
 
-- Rows are `(model, agent)` systems.
+- Rows are `(model, agent)` agent+model pairs.
 - `data/raw/benchmark_level_matrix.csv` columns after `model,agent` are benchmark-level scores.
 - `data/raw/task_level_matrix.csv` columns after `model,agent` are task scores named `benchmark/task_id`.
 - Raw score scales are mixed. Most columns are bounded pass-rate style metrics, but `algotune` is unbounded and some benchmarks contain negative values, so imputation is done in robust per-column normalized space. Nonnegative unbounded columns use `log1p` before normalization and are inverse-transformed after imputation.
 - SVD-filled processed matrices are dense. Missingness fields refer to original raw coverage and are retained for evidence-quality filtering.
-- Per-benchmark mini-leaderboards use SVD-filled raw benchmark scores. Cross-benchmark regressions, correlations, and Terminus deltas use benchmark-relative scores because raw benchmark scales are heterogeneous.
+- Per-benchmark mini-leaderboards use SVD-filled benchmark scores. Cross-benchmark regressions, correlations, and Terminus deltas use benchmark-relative scores because benchmark scales are heterogeneous.
 - Paper-facing benchmark-level analyses filter out benchmarks with fewer than 15 observed agent+model rows or more than 45% missingness.
 - Prefer `agent+model` for descriptive row labels. Treat `model` and `agent` separately for analysis claims unless the method explicitly says otherwise.
 

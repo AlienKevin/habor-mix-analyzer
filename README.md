@@ -31,12 +31,24 @@ Use `--clean` to clean generated outputs for the selected step before running it
 
 ## Code Structure
 
-- `src/habor_mix_analyzer/common.py`: paths, constants, shared I/O, plotting helpers.
-- `src/habor_mix_analyzer/imputation.py`: robust scaling, SVD rank selection, imputation, processed matrix writing.
-- `src/habor_mix_analyzer/analysis.py`: intermediate tables, benchmark/task study tables, predictability, similarity, Terminus deltas, HaborMix selection.
-- `src/habor_mix_analyzer/figures.py`: paper-facing visualizations.
-- `src/habor_mix_analyzer/reports.py`: embedded Markdown reports.
-- `src/habor_mix_analyzer/pipeline.py`: short CLI orchestrator for step composition.
+- `src/habor_mix_analyzer/cli.py`: minimal CLI entry point exposed by `uv run habor-analyze`.
+- `src/habor_mix_analyzer/pipeline.py`: compatibility entry point that forwards to the CLI.
+- `src/habor_mix_analyzer/orchestration/runner.py`: step composition for `impute`, `intermediate`, and `studies`.
+- `src/habor_mix_analyzer/core/`: paths, constants, shared I/O helpers, report helpers, and plotting style.
+- `src/habor_mix_analyzer/preprocessing/svd_imputation.py`: robust scaling, SVD rank selection, imputation, and processed matrix writing.
+- `src/habor_mix_analyzer/studies/intermediate_tables.py`: shared processed tables used by later studies.
+- `src/habor_mix_analyzer/studies/coverage_filtering.py`: benchmark coverage filtering.
+- `src/habor_mix_analyzer/studies/model_agent_roles.py`: model-vs-agent fixed-effect and per-benchmark role analysis.
+- `src/habor_mix_analyzer/studies/benchmark_predictability.py`: BenchPress-style benchmark predictability and PCA.
+- `src/habor_mix_analyzer/studies/benchmark_similarity.py`: benchmark correlations, similarity, and clustering.
+- `src/habor_mix_analyzer/studies/leaderboards.py`: agent+model aggregate and per-benchmark leaderboard tables.
+- `src/habor_mix_analyzer/studies/terminus_comparison.py`: paired Terminus harness deltas.
+- `src/habor_mix_analyzer/studies/task_alignment.py`: task aggregate to benchmark score alignment.
+- `src/habor_mix_analyzer/studies/task_selection.py`: task reliability filtering and HaborMix candidate selection.
+- `src/habor_mix_analyzer/studies/task_similarity.py`: task predictability, representativeness, and within/cross-benchmark similarity.
+- `src/habor_mix_analyzer/studies/provenance.py`: provenance and imputation diagnostics tables.
+- `src/habor_mix_analyzer/visualization/`: paper-facing benchmark, leaderboard, and task figures.
+- `src/habor_mix_analyzer/reporting/paper_report.py`: embedded Markdown reports.
 
 ## Current Inputs
 
@@ -62,7 +74,8 @@ Paper-facing results:
 - `output/paper/reports/key_findings.md`
 - `output/paper/tables/benchmark_filtering.csv`
 - `output/paper/tables/analysis_data_provenance.csv`
-- `output/paper/tables/benchmark_raw_scores_long.csv`
+- `output/paper/tables/imputation_diagnostics_summary.csv`
+- `output/paper/tables/benchmark_scores_long.csv`
 - `output/paper/tables/benchmark_model_adjusted_effects.csv`
 - `output/paper/tables/benchmark_agent_adjusted_effects.csv`
 - `output/paper/tables/benchmark_agent_lift_vs_terminus.csv`
@@ -109,8 +122,8 @@ The raw matrices are incomplete and have mixed score scales. The pipeline theref
 6. Builds benchmark correlation, predictability, similarity clusters, variance attribution, task difficulty, task similarity, task predictability, task representativeness, mini-leaderboards, and agent-differential tables.
 7. Filters sparse benchmarks before paper-facing analysis, then writes separate benchmark-level and task-level study outputs plus an embedded paper-facing narrative report.
 
-The SVD-filled processed matrices are dense. Missingness columns in reports and tables refer to the original raw-table coverage, and are retained to distinguish measured evidence from SVD-filled cells.
+The SVD-filled processed matrices are dense. Missingness columns in reports and tables refer to the original input-table coverage, and are retained to distinguish measured evidence from SVD-filled cells.
 
-Per-benchmark mini-leaderboards use SVD-filled raw benchmark scores on each benchmark's original metric scale. Cross-benchmark regressions, similarity, and Terminus deltas still use benchmark-relative scores because raw scales are heterogeneous and cannot be averaged directly across benchmarks.
+Per-benchmark mini-leaderboards use SVD-filled benchmark scores on each benchmark's original metric scale. Cross-benchmark regressions, similarity, and Terminus deltas still use benchmark-relative scores because benchmark score scales are heterogeneous and cannot be averaged directly across benchmarks.
 
 Trial consistency, pass@k, efficiency, and trajectory failure taxonomy require run-level records with trial IDs, trajectories, tokens, tool calls, wall time, and error labels. Formal IRT/DIF remains deferred until repeated binary or calibrated response data is available; the current task matrix supports weaker task difficulty, discrimination, predictability, and representativeness analyses.
