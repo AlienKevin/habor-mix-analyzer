@@ -115,3 +115,12 @@ Much better! Several more comments:
 2. For difficulty label colors, swap the color for frontier and difficult. Then it should be good-looking.
 3. For benchmark and task similarity heatmaps, I don't know what's your order - I prefer to order by clusters, i.e., more similar benchmarks should be placed together, so that the heatmap shows clear clustering patterns.
 4. benchmark uniqueness_vs_converage figure didn't seem to tell a good story from the layout. Maybe change the layout or even the analysis method?
+
+---
+
+Great! Some more things:
+1. FOr minileaderboards, put per-benchmark and clustered ones in separate subdirs. This creates a better layer. Then for the analysis, It's okay to just show the clustered images - we don't need the per-benchmark minileaderboard to cramp the entire report.
+2. The report should be written by you by looking at each of the figures and tables and for you to conduct detailed analysis - it shouldn't be just listing the results.
+3. I wonder how you are computing similarities between benchmarks and tasks. Are you using the same-dimensional vectors to group? This is okay, but if you are not, then tell me what you are using
+4. How reliable is the SVD filling? Can you tell me.
+5. For benchmark score filling, how are you doing that? We should first fill the task matrix with svd, and then just simply aggregrate to get the benchmark matrix. I am seeing very strange behavior in some benchmarks, maybe because of sparsity of data. Actually, if you can think of a better way to fill the data, you don't necessarily need to use SVD - feel free to use others if they are better.
