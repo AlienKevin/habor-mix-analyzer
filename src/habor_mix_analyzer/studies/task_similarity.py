@@ -50,15 +50,24 @@ def task_similarity_and_representatives(
         )
         aggregate = task_profiles[idx].mean(axis=0)
         aggregate_corr = np.array([corr_or_nan(task_profiles[i], aggregate) for i in idx])
+        leave_one_out_corr = []
+        for task_idx in idx:
+            peers = idx[idx != task_idx]
+            peer_aggregate = task_profiles[peers].mean(axis=0) if len(peers) else aggregate
+            leave_one_out_corr.append(corr_or_nan(task_profiles[task_idx], peer_aggregate))
+        leave_one_out_corr = np.array(leave_one_out_corr, dtype=float)
         for local_pos, task_idx in enumerate(idx):
             task_col = task_index[task_idx]
             task_row = reliable[reliable["task_column"] == task_col].iloc[0]
+            useful_rep = abs(leave_one_out_corr[local_pos]) * float(task_row["observed_std"])
             representative_rows.append(
                 {
                     "benchmark": benchmark,
                     "task_column": task_col,
                     "task_id": task_row["task_id"],
                     "representativeness_score": float(abs(aggregate_corr[local_pos])),
+                    "leave_one_out_aggregate_correlation": float(leave_one_out_corr[local_pos]),
+                    "useful_representativeness_score": float(useful_rep),
                     "mean_abs_similarity_to_peer_tasks": float(mean_peer[local_pos]),
                     "difficulty_tier": task_row["difficulty_tier"],
                     "task_score": task_row["imputed_mean"],
@@ -83,7 +92,7 @@ def task_similarity_and_representatives(
             )
 
     sampled = (
-        reliable.sort_values(["mix_selection_score", "observed_count"], ascending=False)
+        reliable.sort_values(["observed_std", "strength_correlation", "observed_count"], ascending=False)
         .groupby("benchmark")
         .head(40)
         .reset_index(drop=True)

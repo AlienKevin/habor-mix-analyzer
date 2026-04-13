@@ -199,6 +199,68 @@ def svd_impute_dataframe(
     )
 
 
+def aggregate_task_result_to_benchmarks(
+    raw_benchmark: pd.DataFrame,
+    raw_task: pd.DataFrame,
+    task_result: ImputationResult,
+) -> ImputationResult:
+    benchmark_cols = score_columns(raw_benchmark)
+    task_cols = score_columns(raw_task)
+    task_groups: dict[str, list[str]] = {}
+    for col in task_cols:
+        benchmark, _task_id = col.split("/", 1)
+        task_groups.setdefault(benchmark, []).append(col)
+
+    missing_groups = [benchmark for benchmark in benchmark_cols if benchmark not in task_groups]
+    if missing_groups:
+        raise ValueError(f"Task matrix has no task columns for benchmarks: {missing_groups}")
+
+    aggregate_raw = raw_benchmark[KEY_COLUMNS].copy()
+    aggregate_observed = raw_benchmark[KEY_COLUMNS].copy()
+    raw_task_values = raw_task[task_cols].astype(float)
+    task_result_values = task_result.raw[task_cols].astype(float)
+    stats_rows = []
+    for benchmark in benchmark_cols:
+        cols = task_groups[benchmark]
+        aggregate_raw[benchmark] = task_result_values[cols].mean(axis=1)
+        aggregate_observed[benchmark] = raw_task_values[cols].mean(axis=1, skipna=True)
+        observed_task_counts = raw_task_values[cols].notna().sum(axis=1)
+        stats_rows.append(
+            {
+                "column": benchmark,
+                "task_count": len(cols),
+                "observed_task_cells": int(raw_task_values[cols].notna().sum().sum()),
+                "total_task_cells": int(raw_task_values[cols].size),
+                "task_cell_missing_fraction": float(raw_task_values[cols].isna().mean().mean()),
+                "mean_observed_task_cells_per_agent_model": float(observed_task_counts.mean()),
+                "agent_model_rows_with_any_task_observed": int((observed_task_counts > 0).sum()),
+            }
+        )
+
+    stats = robust_column_stats(aggregate_observed[benchmark_cols].astype(float))
+    stats = stats.merge(pd.DataFrame(stats_rows), on="column", how="left")
+    normalized = normalize(aggregate_raw[benchmark_cols].astype(float), stats)
+    cv = pd.DataFrame(
+        [
+            {
+                "method": "task_svd_then_benchmark_aggregate",
+                "rank": int(task_result.best_rank),
+                "holdout_cells": 0,
+                "rmse": np.nan,
+                "mae": np.nan,
+            }
+        ]
+    )
+    return ImputationResult(
+        normalized=pd.concat([raw_benchmark[KEY_COLUMNS], normalized], axis=1),
+        raw=aggregate_raw,
+        stats=stats,
+        cv=cv,
+        best_rank=0,
+        missing_fraction=float(aggregate_observed[benchmark_cols].isna().mean().mean()),
+    )
+
+
 def write_matrix_outputs(prefix: str, result: ImputationResult) -> None:
     result.raw.to_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_matrix.csv", index=False)
     result.normalized.to_csv(PROCESSED_DIR / f"{prefix}_svd_imputed_normalized_matrix.csv", index=False)
@@ -212,6 +274,24 @@ def write_matrix_outputs(prefix: str, result: ImputationResult) -> None:
         "agent_model_rows": int(result.raw.shape[0]),
     }
     (PROCESSED_DIR / f"{prefix}_imputation_diagnostics.json").write_text(
+        json.dumps(diagnostics, indent=2) + "\n"
+    )
+
+
+def write_benchmark_aggregate_outputs(result: ImputationResult, task_result: ImputationResult) -> None:
+    result.raw.to_csv(PROCESSED_DIR / "benchmark_from_task_aggregate_matrix.csv", index=False)
+    result.normalized.to_csv(PROCESSED_DIR / "benchmark_from_task_aggregate_normalized_matrix.csv", index=False)
+    result.stats.to_csv(PROCESSED_DIR / "benchmark_from_task_aggregate_column_quality.csv", index=False)
+    result.cv.to_csv(PROCESSED_DIR / "benchmark_from_task_aggregate_diagnostics_cv.csv", index=False)
+    diagnostics = {
+        "matrix": "benchmark",
+        "method": "task_svd_then_benchmark_aggregate",
+        "task_svd_rank": task_result.best_rank,
+        "missing_fraction_before_task_aggregation": result.missing_fraction,
+        "columns": int(result.raw.shape[1] - len(KEY_COLUMNS)),
+        "agent_model_rows": int(result.raw.shape[0]),
+    }
+    (PROCESSED_DIR / "benchmark_from_task_aggregate_diagnostics.json").write_text(
         json.dumps(diagnostics, indent=2) + "\n"
     )
 

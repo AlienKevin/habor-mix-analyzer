@@ -25,17 +25,27 @@ def task_aggregate_alignment(
                 & (item_stats["gt_one_count"] == 0)
             ).sum()
         )
+        spearman = (
+            np.nan
+            if np.nanstd(task_aggregate) < 1e-12 or np.nanstd(benchmark_values) < 1e-12
+            else float(pd.Series(task_aggregate).corr(pd.Series(benchmark_values), method="spearman"))
+        )
         rows.append(
             {
                 "benchmark": benchmark,
-                "included_in_benchmark_level_paper_filter": benchmark in included_benchmarks,
+                "included_in_benchmark_level_key_filter": benchmark in included_benchmarks,
                 "n_tasks": len(columns),
                 "n_reliable_bounded_tasks": reliable_tasks,
                 "pearson_agent_model_correlation": corr_or_nan(task_aggregate, benchmark_values),
-                "spearman_agent_model_correlation": (
-                    np.nan
-                    if np.nanstd(task_aggregate) < 1e-12 or np.nanstd(benchmark_values) < 1e-12
-                    else float(pd.Series(task_aggregate).corr(pd.Series(benchmark_values), method="spearman"))
+                "spearman_agent_model_correlation": spearman,
+                "alignment_quality": (
+                    "diagnostic_only_insufficient_reliable_tasks"
+                    if reliable_tasks < 3
+                    else "strong"
+                    if np.isfinite(spearman) and spearman >= 0.70
+                    else "moderate"
+                    if np.isfinite(spearman) and spearman >= 0.40
+                    else "weak"
                 ),
             }
         )

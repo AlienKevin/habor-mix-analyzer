@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from .config import PAPER_FIGURE_DIR
+from .config import KEY_FIGURE_DIR
 
 
 def wrap_text(value: object, width: int = 24) -> str:
@@ -16,8 +16,8 @@ def wrap_text(value: object, width: int = 24) -> str:
     return "\n".join(textwrap.wrap(text, width=width, break_long_words=False)) or text
 
 
-def save_paper_figure(fig: plt.Figure, filename: str) -> None:
-    fig.savefig(PAPER_FIGURE_DIR / filename, dpi=200, bbox_inches="tight", pad_inches=0.08)
+def save_key_figure(fig: plt.Figure, filename: str) -> None:
+    fig.savefig(KEY_FIGURE_DIR / filename, dpi=200, bbox_inches="tight", pad_inches=0.08)
 
 
 def set_plot_style() -> None:

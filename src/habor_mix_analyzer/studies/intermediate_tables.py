@@ -4,15 +4,15 @@ from ..core import *
 from ..preprocessing.svd_imputation import singular_value_report
 
 
-def benchmark_long(raw: pd.DataFrame, imputed: pd.DataFrame, normalized: pd.DataFrame) -> pd.DataFrame:
+def benchmark_long(raw: pd.DataFrame, aggregated: pd.DataFrame, normalized: pd.DataFrame) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
     for benchmark in score_columns(raw):
         part = raw[KEY_COLUMNS].copy()
         part["benchmark"] = benchmark
-        part["observed_score"] = raw[benchmark]
-        part["score"] = imputed[benchmark]
+        part["original_benchmark_table_score"] = raw[benchmark]
+        part["benchmark_score"] = aggregated[benchmark]
         part["normalized_score"] = normalized[benchmark]
-        part["was_imputed"] = raw[benchmark].isna()
+        part["original_benchmark_table_missing"] = raw[benchmark].isna()
         rows.append(part)
     return pd.concat(rows, ignore_index=True)
 
@@ -124,7 +124,7 @@ def agent_model_strength_scores(benchmark_result: ImputationResult, raw_benchmar
     out = benchmark_result.normalized[KEY_COLUMNS].copy()
     out["normalized_mean"] = benchmark_result.normalized[cols].mean(axis=1)
     out["normalized_median"] = benchmark_result.normalized[cols].median(axis=1)
-    out["observed_fraction"] = raw_benchmark[cols].notna().mean(axis=1)
+    out["original_benchmark_table_coverage"] = raw_benchmark[cols].notna().mean(axis=1)
     out["rank"] = out["normalized_mean"].rank(ascending=False, method="min").astype(int)
     return out.sort_values("rank")
 

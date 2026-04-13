@@ -5,12 +5,12 @@ from ..core import *
 
 def benchmark_filter_table(stats: pd.DataFrame, min_observed: int = 15, max_missing: float = 0.45) -> pd.DataFrame:
     table = stats.rename(columns={"column": "benchmark"}).copy()
-    table["include_in_paper_analysis"] = (table["observed_count"] >= min_observed) & (
+    table["include_in_key_analysis"] = (table["observed_count"] >= min_observed) & (
         table["missing_fraction"] <= max_missing
     )
 
     def reason(row: pd.Series) -> str:
-        if row["include_in_paper_analysis"]:
+        if row["include_in_key_analysis"]:
             return "included"
         if row["observed_count"] < min_observed:
             return f"excluded: fewer than {min_observed} observed agent+model rows"
@@ -19,11 +19,14 @@ def benchmark_filter_table(stats: pd.DataFrame, min_observed: int = 15, max_miss
     table["filter_reason"] = table.apply(reason, axis=1)
     ordered = [
         "benchmark",
-        "include_in_paper_analysis",
+        "include_in_key_analysis",
         "filter_reason",
         "observed_count",
         "missing_count",
         "missing_fraction",
+        "task_count",
+        "task_cell_missing_fraction",
+        "mean_observed_task_cells_per_agent_model",
         "mean",
         "std",
         "median",
@@ -33,4 +36,5 @@ def benchmark_filter_table(stats: pd.DataFrame, min_observed: int = 15, max_miss
         "negative_count",
         "gt_one_count",
     ]
-    return table[ordered].sort_values(["include_in_paper_analysis", "observed_count"], ascending=[False, False])
+    ordered = [col for col in ordered if col in table.columns]
+    return table[ordered].sort_values(["include_in_key_analysis", "observed_count"], ascending=[False, False])

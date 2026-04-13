@@ -49,7 +49,13 @@ def markdown_table(df: pd.DataFrame, columns: list[str], n: int = 8) -> list[str
 
     subset = df.head(n)[columns].copy()
     for col in subset.columns:
-        subset[col] = subset[col].map(lambda value: f"{value:.3f}" if isinstance(value, float) else str(value))
+        subset[col] = subset[col].map(
+            lambda value: ""
+            if pd.isna(value)
+            else f"{value:.3f}"
+            if isinstance(value, float)
+            else str(value)
+        )
 
     header = "| " + " | ".join(subset.columns) + " |"
     separator = "| " + " | ".join(["---"] * len(subset.columns)) + " |"

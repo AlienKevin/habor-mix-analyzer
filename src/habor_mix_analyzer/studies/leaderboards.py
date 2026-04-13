@@ -16,7 +16,7 @@ def agent_model_scores_for_cols(
     out["median_score_percentile_across_benchmarks"] = score_percentile.median(axis=1)
     out["mean_benchmark_relative_score"] = benchmark_result.normalized[cols].mean(axis=1)
     out["median_benchmark_relative_score"] = benchmark_result.normalized[cols].median(axis=1)
-    out["observed_fraction_on_included_benchmarks"] = raw_benchmark[cols].notna().mean(axis=1)
+    out["original_benchmark_table_coverage"] = raw_benchmark[cols].notna().mean(axis=1)
     out["rank"] = out["mean_score_percentile_across_benchmarks"].rank(ascending=False, method="min").astype(int)
     return out.sort_values("rank")
 
@@ -32,8 +32,8 @@ def benchmark_scores_long(
         part["agent_model"] = part["agent"] + " + " + part["model"]
         part["benchmark"] = benchmark
         part["benchmark_score"] = benchmark_result.raw[benchmark]
-        part["observed_benchmark_score"] = raw_benchmark[benchmark]
+        part["original_benchmark_table_score"] = raw_benchmark[benchmark]
         part["benchmark_relative_score_for_cross_benchmark_methods"] = benchmark_result.normalized[benchmark]
-        part["was_svd_filled"] = raw_benchmark[benchmark].isna()
+        part["original_benchmark_table_missing"] = raw_benchmark[benchmark].isna()
         rows.append(part)
     return pd.concat(rows, ignore_index=True)

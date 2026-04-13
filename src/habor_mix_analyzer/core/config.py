@@ -11,14 +11,14 @@ RAW_DIR = ROOT / "data" / "raw"
 PROCESSED_DIR = ROOT / "data" / "processed" / "intermediate"
 
 OUTPUT_DIR = ROOT / "output"
-STUDY_DIR = OUTPUT_DIR / "studies"
-BENCHMARK_STUDY_DIR = STUDY_DIR / "benchmark_level"
-TASK_STUDY_DIR = STUDY_DIR / "task_level"
+INTERMEDIATE_STUDY_DIR = OUTPUT_DIR / "intermediate_studies"
+BENCHMARK_INTERMEDIATE_STUDY_DIR = INTERMEDIATE_STUDY_DIR / "benchmark_level"
+TASK_INTERMEDIATE_STUDY_DIR = INTERMEDIATE_STUDY_DIR / "task_level"
 
-PAPER_DIR = OUTPUT_DIR / "paper"
-PAPER_TABLE_DIR = PAPER_DIR / "tables"
-PAPER_FIGURE_DIR = PAPER_DIR / "figures"
-PAPER_REPORT_DIR = PAPER_DIR / "reports"
+KEY_ANALYSIS_DIR = OUTPUT_DIR / "key_analyses"
+KEY_TABLE_DIR = KEY_ANALYSIS_DIR / "tables"
+KEY_FIGURE_DIR = KEY_ANALYSIS_DIR / "figures"
+KEY_REPORT_DIR = KEY_ANALYSIS_DIR / "reports"
 
 KEY_COLUMNS = ["model", "agent"]
 RANDOM_SEED = 42

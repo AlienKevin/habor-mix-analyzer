@@ -20,7 +20,7 @@ def adjusted_group_effects(long_df: pd.DataFrame, group_col: str, controls: list
         .agg(
             adjusted_mean=("adjusted_score", "mean"),
             adjusted_std=("adjusted_score", "std"),
-            raw_normalized_mean=("normalized_score", "mean"),
+            unadjusted_benchmark_relative_mean=("normalized_score", "mean"),
             observations=("normalized_score", "size"),
         )
         .reset_index()

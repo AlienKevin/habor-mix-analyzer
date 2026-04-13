@@ -7,39 +7,39 @@ def analysis_data_provenance() -> pd.DataFrame:
     rows = [
         {
             "analysis": "coverage filtering",
-            "primary_matrix": "raw benchmark matrix metadata",
-            "processed_output": "data/processed/intermediate/benchmark_column_quality.csv",
-            "notes": "Uses observed counts and original missingness to avoid overclaiming from SVD-filled cells.",
+            "primary_matrix": "task-observed benchmark aggregate metadata",
+            "processed_output": "data/processed/intermediate/benchmark_from_task_aggregate_column_quality.csv",
+            "notes": "Uses task-observed aggregate counts and task-cell missingness to avoid overclaiming from SVD-filled task cells.",
         },
         {
             "analysis": "agent+model aggregate leaderboard",
-            "primary_matrix": "SVD-filled benchmark score matrix",
-            "processed_output": "data/processed/intermediate/benchmark_svd_imputed_matrix.csv",
+            "primary_matrix": "benchmark scores aggregated from SVD-filled task matrix",
+            "processed_output": "data/processed/intermediate/benchmark_from_task_aggregate_matrix.csv",
             "notes": "Ranks agent+model rows by mean within-benchmark percentile computed from benchmark scores.",
         },
         {
             "analysis": "per-benchmark mini-leaderboards",
-            "primary_matrix": "SVD-filled benchmark score matrix",
-            "processed_output": "data/processed/intermediate/benchmark_svd_imputed_matrix.csv",
-            "notes": "Displays scores on each benchmark's original metric scale; an observed/imputed flag is retained in the long table.",
+            "primary_matrix": "benchmark scores aggregated from SVD-filled task matrix",
+            "processed_output": "data/processed/intermediate/benchmark_from_task_aggregate_matrix.csv",
+            "notes": "Displays scores on each benchmark's original metric scale after task-SVD aggregation.",
         },
         {
             "analysis": "model vs agent roles",
-            "primary_matrix": "SVD-filled benchmark-relative matrix",
-            "processed_output": "data/processed/intermediate/benchmark_svd_imputed_normalized_matrix.csv",
+            "primary_matrix": "benchmark-relative matrix aggregated from SVD-filled tasks",
+            "processed_output": "data/processed/intermediate/benchmark_from_task_aggregate_normalized_matrix.csv",
             "notes": "Uses benchmark-relative scores because fixed-effect decomposition compares variation across heterogeneous benchmark scales.",
         },
         {
             "analysis": "benchmark predictability and similarity",
-            "primary_matrix": "SVD-filled benchmark-relative matrix",
-            "processed_output": "data/processed/intermediate/benchmark_svd_imputed_normalized_matrix.csv",
+            "primary_matrix": "benchmark-relative matrix aggregated from SVD-filled tasks",
+            "processed_output": "data/processed/intermediate/benchmark_from_task_aggregate_normalized_matrix.csv",
             "notes": "Uses benchmark-relative score profiles so Spearman similarity and ridge prediction are not dominated by heterogeneous benchmark score scales.",
         },
         {
             "analysis": "terminus harness deltas",
-            "primary_matrix": "SVD-filled benchmark-relative matrix",
-            "processed_output": "data/processed/intermediate/benchmark_svd_imputed_normalized_matrix.csv",
-            "notes": "Uses paired deltas on the same benchmark/model cells; raw deltas across benchmarks are not comparable.",
+            "primary_matrix": "benchmark-relative matrix aggregated from SVD-filled tasks",
+            "processed_output": "data/processed/intermediate/benchmark_from_task_aggregate_normalized_matrix.csv",
+            "notes": "Uses paired deltas on the same benchmark/model cells; score deltas across heterogeneous benchmark scales are not comparable without normalization.",
         },
         {
             "analysis": "task similarity and representatives",
@@ -63,21 +63,31 @@ def imputation_diagnostics_summary(
 ) -> pd.DataFrame:
     rows = []
     for name, result in [("benchmark", benchmark_result), ("task", task_result)]:
-        best = result.cv.sort_values(["rmse", "rank"]).iloc[0]
-        second = result.cv.sort_values(["rmse", "rank"]).iloc[1] if len(result.cv) > 1 else best
+        cv = result.cv.sort_values(["rmse", "rank"], na_position="last")
+        best = cv.iloc[0]
+        second = cv.iloc[1] if len(cv) > 1 else best
+        is_benchmark_aggregate = name == "benchmark" and pd.isna(best["rmse"])
         rows.append(
             {
                 "matrix": name,
                 "agent_model_rows": int(result.raw.shape[0]),
                 "score_columns": int(result.raw.shape[1] - len(KEY_COLUMNS)),
-                "missing_fraction_before_svd": result.missing_fraction,
-                "selected_svd_rank": int(result.best_rank),
+                "preprocessing_method": (
+                    "task_svd_then_benchmark_aggregate" if is_benchmark_aggregate else "column_scaled_iterative_svd"
+                ),
+                "missing_fraction_before_processing": result.missing_fraction,
+                "selected_svd_rank": int(result.best_rank) if not is_benchmark_aggregate else np.nan,
+                "task_svd_rank_used_for_benchmark_aggregation": (
+                    int(best["rank"]) if is_benchmark_aggregate else np.nan
+                ),
                 "holdout_cells": int(best["holdout_cells"]),
-                "holdout_rmse_scaled_score_space": float(best["rmse"]),
-                "holdout_mae_scaled_score_space": float(best["mae"]),
-                "rmse_gap_to_second_best_rank": float(second["rmse"] - best["rmse"]),
+                "holdout_rmse_scaled_score_space": float(best["rmse"]) if not is_benchmark_aggregate else np.nan,
+                "holdout_mae_scaled_score_space": float(best["mae"]) if not is_benchmark_aggregate else np.nan,
+                "rmse_gap_to_second_best_rank": (
+                    float(second["rmse"] - best["rmse"]) if not is_benchmark_aggregate else np.nan
+                ),
                 "interpretation": (
-                    "Used for benchmark-level score analyses after filtering sparse benchmark columns."
+                    "Benchmark scores are not SVD-imputed directly; they are means of task scores after task-level SVD filling."
                     if name == "benchmark"
                     else "Used with task-level reliability filters; task matrix is much wider and sparser, so item-level conclusions are restricted to reliable bounded non-degenerate tasks."
                 ),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from ..core import *
 
 
-def save_paper_effect_plot(effects: pd.DataFrame, group_col: str, filename: str, title: str) -> None:
+def save_key_effect_plot(effects: pd.DataFrame, group_col: str, filename: str, title: str) -> None:
     plot_df = effects.sort_values("adjusted_mean")
     labels = [wrap_text(value, width=28) for value in plot_df[group_col]]
     fig, ax = plt.subplots(figsize=(11.5, max(5.2, 0.42 * len(plot_df))))
@@ -14,7 +14,7 @@ def save_paper_effect_plot(effects: pd.DataFrame, group_col: str, filename: str,
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_paper_figure(fig, filename)
+    save_key_figure(fig, filename)
     plt.close(fig)
 
 
@@ -34,7 +34,7 @@ def save_agent_lift_heatmap(agent_by_benchmark: pd.DataFrame) -> None:
     cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label(DELTA_SCORE_LABEL)
     fig.tight_layout()
-    save_paper_figure(fig, "benchmark_agent_lift_heatmap.png")
+    save_key_figure(fig, "benchmark_agent_lift_heatmap.png")
     plt.close(fig)
 
 
@@ -66,7 +66,7 @@ def save_benchmark_uniqueness_plot(uniqueness: pd.DataFrame, filter_table: pd.Da
     ax.set_ylabel("Cross-validated R2 from other included benchmarks")
     ax.grid(color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_paper_figure(fig, "benchmark_uniqueness_vs_coverage.png")
+    save_key_figure(fig, "benchmark_uniqueness_vs_coverage.png")
     plt.close(fig)
 
 
@@ -106,11 +106,11 @@ def save_benchmark_role_plot(role: pd.DataFrame) -> None:
     ax.set_ylabel("Partial R2 added by agent after controlling for model")
     ax.grid(color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_paper_figure(fig, "benchmark_model_vs_agent_role.png")
+    save_key_figure(fig, "benchmark_model_vs_agent_role.png")
     plt.close(fig)
 
 
-def save_variance_paper_plot(variance_df: pd.DataFrame) -> None:
+def save_key_variance_plot(variance_df: pd.DataFrame) -> None:
     plot_df = variance_df[variance_df["component"] != "all_main_effects"].sort_values(
         "partial_r2_over_other_main_effects"
     )
@@ -121,7 +121,7 @@ def save_variance_paper_plot(variance_df: pd.DataFrame) -> None:
     ax.set_ylabel("")
     ax.grid(axis="x", color="#dddddd", linewidth=0.8)
     fig.tight_layout()
-    save_paper_figure(fig, "benchmark_variance_attribution.png")
+    save_key_figure(fig, "benchmark_variance_attribution.png")
     plt.close(fig)
 
 
@@ -137,7 +137,7 @@ def save_benchmark_cluster_heatmap(ordered_corr: pd.DataFrame) -> None:
     cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label("Spearman correlation of agent+model score profiles")
     fig.tight_layout()
-    save_paper_figure(fig, "benchmark_similarity_clustered_heatmap.png")
+    save_key_figure(fig, "benchmark_similarity_clustered_heatmap.png")
     plt.close(fig)
 
 
@@ -155,5 +155,5 @@ def save_terminus_delta_by_model_plot(terminus_by_model: pd.DataFrame) -> None:
     cbar = fig.colorbar(image, ax=ax, fraction=0.045, pad=0.02)
     cbar.set_label(DELTA_SCORE_LABEL)
     fig.tight_layout()
-    save_paper_figure(fig, "terminus_delta_by_model_heatmap.png")
+    save_key_figure(fig, "terminus_delta_by_model_heatmap.png")
     plt.close(fig)
