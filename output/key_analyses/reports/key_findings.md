@@ -4,7 +4,7 @@
 
 The filtering table is now evidence-based on the task-first pipeline: benchmark scores come from task-SVD aggregates, while the missingness columns describe how much original task evidence supported each aggregate before filling.
 
-![Benchmark uniqueness after coverage filtering](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
+![Benchmark predictability ranking](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
 
 | benchmark | include_in_key_analysis | observed_count | task_cell_missing_fraction |
 | --- | --- | --- | --- |

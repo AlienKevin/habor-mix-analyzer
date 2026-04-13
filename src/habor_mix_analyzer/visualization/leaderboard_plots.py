@@ -22,27 +22,27 @@ def _plot_grouped_leaderboard(
     leaders: pd.DataFrame,
     benchmark: str,
     agent_colors: dict[str, str],
-    label_size: int = 10,
-    title_size: int = 15,
-    axis_size: int = 11,
-    legend_size: int = 9,
+    label_size: int = 11,
+    title_size: int = 16,
+    axis_size: int = 12,
+    legend_size: int = 10,
 ) -> None:
     model_order = leaders.groupby("model")["benchmark_score"].max().sort_values(ascending=True).index.tolist()
     model_to_y = {model: pos for pos, model in enumerate(model_order)}
     for model, model_group in leaders.groupby("model", sort=False):
         group = model_group.sort_values("agent")
-        offsets = np.linspace(-0.13, 0.13, len(group)) if len(group) > 1 else [0]
+        offsets = np.linspace(-0.18, 0.18, len(group)) if len(group) > 1 else [0]
         for offset, row in zip(offsets, group.itertuples()):
             ax.barh(
                 model_to_y[row.model] + offset,
                 row.benchmark_score,
-                height=0.24,
+                height=0.34,
                 color=agent_colors[row.agent],
                 edgecolor="white",
                 label=row.agent,
             )
     ax.set_yticks(list(model_to_y.values()))
-    ax.set_yticklabels([wrap_text(model, 22) for model in model_order], fontsize=label_size)
+    ax.set_yticklabels([wrap_text(model, 30) for model in model_order], fontsize=label_size)
     ax.set_title(wrap_text(benchmark, 26), fontsize=title_size)
     ax.set_xlabel("Benchmark score", fontsize=axis_size)
     ax.tick_params(axis="x", labelsize=axis_size - 1)
@@ -80,8 +80,8 @@ def benchmark_mini_leaderboard_tables_and_figures(
         for page_idx, page_benchmarks in enumerate(cluster_pages, start=1):
             ncols = 2 if len(page_benchmarks) > 1 else 1
             nrows = math.ceil(len(page_benchmarks) / ncols)
-            panel_height = max(4.8, 0.20 * n_models)
-            fig, axes = plt.subplots(nrows, ncols, figsize=(14, 1.6 + panel_height * nrows))
+            panel_height = max(4.5, 0.18 * n_models)
+            fig, axes = plt.subplots(nrows, ncols, figsize=(13.2, 1.4 + panel_height * nrows))
             axes_flat = np.atleast_1d(axes).ravel()
             for ax, benchmark in zip(axes_flat, page_benchmarks):
                 leaders = scores[["agent_model", "model", "agent", benchmark]].sort_values(
@@ -109,13 +109,13 @@ def benchmark_mini_leaderboard_tables_and_figures(
                     leaders,
                     benchmark,
                     agent_colors,
-                    label_size=8,
-                    title_size=12,
-                    axis_size=9,
-                    legend_size=6,
+                    label_size=8.5,
+                    title_size=12.5,
+                    axis_size=9.5,
+                    legend_size=6.5,
                 )
-                single_fig, single_ax = plt.subplots(figsize=(10, max(5.4, 0.32 * n_models)))
-                _plot_grouped_leaderboard(single_ax, leaders, benchmark, agent_colors, label_size=10)
+                single_fig, single_ax = plt.subplots(figsize=(9.6, max(5.4, 0.34 * n_models)))
+                _plot_grouped_leaderboard(single_ax, leaders, benchmark, agent_colors, label_size=11)
                 single_fig.suptitle(
                     "Rows are models; colored paired bars compare available agents",
                     y=0.995,

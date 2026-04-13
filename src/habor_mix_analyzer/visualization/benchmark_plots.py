@@ -39,32 +39,24 @@ def save_agent_lift_heatmap(agent_by_benchmark: pd.DataFrame) -> None:
 
 
 def save_benchmark_uniqueness_plot(uniqueness: pd.DataFrame, filter_table: pd.DataFrame) -> None:
-    plot_df = uniqueness.merge(filter_table[["benchmark", "observed_count"]], on="benchmark", how="left")
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.scatter(
-        plot_df["observed_count"],
-        plot_df["cv_r2_from_other_included_benchmarks"],
-        s=90,
-        color="#fdae6b",
-        edgecolor="white",
-        alpha=0.85,
-    )
-    label_df = plot_df.sort_values("cv_r2_from_other_included_benchmarks").head(6)
-    for i, row in enumerate(label_df.itertuples()):
-        x_offset = -62 if row.observed_count >= 25 else 6
-        y_offset = [8, -10, 16, -18][i % 4]
-        ax.annotate(
-            wrap_text(row.benchmark, 14),
-            (row.observed_count, row.cv_r2_from_other_included_benchmarks),
-            xytext=(x_offset, y_offset),
-            textcoords="offset points",
-            fontsize=9,
-        )
-    ax.axhline(0, color="#777777", linewidth=1)
-    ax.set_title("Benchmark Uniqueness After Coverage Filtering")
-    ax.set_xlabel("Observed agent+model rows")
-    ax.set_ylabel("Cross-validated R2 from other included benchmarks")
-    ax.grid(color="#dddddd", linewidth=0.8)
+    plot_df = uniqueness.merge(
+        filter_table[["benchmark", "task_cell_missing_fraction"]],
+        on="benchmark",
+        how="left",
+    ).sort_values("cv_r2_from_other_included_benchmarks")
+    labels = [wrap_text(value, 24) for value in plot_df["benchmark"]]
+    values = plot_df["cv_r2_from_other_included_benchmarks"].astype(float)
+    colors = np.where(values < 0, "#fdae6b", "#9ecae1")
+    fig, ax = plt.subplots(figsize=(11.5, max(8.2, 0.30 * len(plot_df))))
+    ax.barh(labels, values, color=colors, edgecolor="white")
+    ax.axvline(0, color="#777777", linewidth=1)
+    ax.set_title("Benchmark Predictability From Other Benchmarks")
+    ax.set_xlabel("Cross-validated R2 predicted from other included benchmarks\n(lower = more unique / harder to reconstruct)")
+    ax.set_ylabel("")
+    ax.grid(axis="x", color="#dddddd", linewidth=0.8)
+    left_edge = min(values.min(), 0)
+    right_edge = max(values.max(), 0)
+    ax.set_xlim(left_edge - 0.08 * max(1, abs(left_edge)), right_edge + 0.08 * max(1, abs(right_edge)))
     fig.tight_layout()
     save_key_figure(fig, "benchmark_level/benchmark_uniqueness_vs_coverage.png")
     plt.close(fig)
@@ -136,6 +128,13 @@ def save_benchmark_cluster_heatmap(ordered_corr: pd.DataFrame) -> None:
     ax.set_yticklabels([wrap_text(value, 16) for value in matrix.index], fontsize=9)
     cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label("Spearman correlation of agent+model score profiles")
+    distance_array = (1 - matrix.abs()).to_numpy(copy=True)
+    np.fill_diagonal(distance_array, 0)
+    labels = fcluster(linkage(squareform(distance_array, checks=False), method="average"), t=6, criterion="maxclust")
+    boundaries = np.where(labels[1:] != labels[:-1])[0] + 0.5
+    for boundary in boundaries:
+        ax.axhline(boundary, color="white", linewidth=1.8)
+        ax.axvline(boundary, color="white", linewidth=1.8)
     fig.tight_layout()
     save_key_figure(fig, "benchmark_level/benchmark_similarity_clustered_heatmap.png")
     plt.close(fig)

@@ -13,7 +13,7 @@ def _task_composition_inputs(task_summary: pd.DataFrame) -> tuple[pd.DataFrame, 
         "easy": "easy (70-95%)",
         "saturated": "saturated (>95%)",
     }
-    colors = ["#c7e9c0", "#74c476", "#9ecae1", "#fdd0a2", "#fdae6b"]
+    colors = ["#74c476", "#c7e9c0", "#9ecae1", "#fdd0a2", "#fdae6b"]
     return plot_df, tier_cols, tier_labels, colors
 
 
@@ -115,8 +115,16 @@ def save_task_similarity_heatmap(cross_similarity: pd.DataFrame, benchmark_clust
             if pd.isna(pivot.loc[left, right]) and right in pivot.index and left in pivot.columns:
                 pivot.loc[left, right] = pivot.loc[right, left]
     pivot = pivot.fillna(0)
-    clusters = benchmark_clusters.set_index("benchmark")["similarity_cluster"]
-    order = sorted(all_benchmarks, key=lambda b: (clusters.get(b, 999), b))
+    distance_array = (1 - pivot.to_numpy(dtype=float)).clip(0, 1)
+    np.fill_diagonal(distance_array, 0)
+    if len(all_benchmarks) >= 2:
+        z = linkage(squareform(distance_array, checks=False), method="average")
+        order = pivot.index[leaves_list(z)].tolist()
+        cluster_labels = fcluster(z, t=min(6, len(all_benchmarks)), criterion="maxclust")
+        label_by_benchmark = dict(zip(pivot.index, cluster_labels))
+    else:
+        order = all_benchmarks
+        label_by_benchmark = {benchmark: 1 for benchmark in all_benchmarks}
     pivot = pivot.loc[order, order]
     fig, ax = plt.subplots(figsize=(15, 13))
     image = ax.imshow(pivot.to_numpy(dtype=float), cmap="YlGnBu", vmin=0, vmax=1)
@@ -127,6 +135,11 @@ def save_task_similarity_heatmap(cross_similarity: pd.DataFrame, benchmark_clust
     ax.set_yticklabels([wrap_text(value, 16) for value in order], fontsize=9)
     cbar = fig.colorbar(image, ax=ax, fraction=0.035, pad=0.02)
     cbar.set_label("Median absolute Spearman correlation between reliable task score profiles")
+    ordered_labels = np.array([label_by_benchmark[benchmark] for benchmark in order])
+    boundaries = np.where(ordered_labels[1:] != ordered_labels[:-1])[0] + 0.5
+    for boundary in boundaries:
+        ax.axhline(boundary, color="white", linewidth=1.8)
+        ax.axvline(boundary, color="white", linewidth=1.8)
     fig.tight_layout()
     save_key_figure(fig, "task_level/task_similarity_benchmark_pair_heatmap.png")
     plt.close(fig)

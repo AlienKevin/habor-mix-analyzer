@@ -287,7 +287,7 @@ Benchmarks with the largest model-vs-agent role imbalance:
 - `output/key_analyses/tables/benchmark_level/benchmark_redundancy_pairs_filtered.csv`
 - `output/key_analyses/tables/benchmark_level/benchmark_correlation_clustered.csv`
 
-![Benchmark uniqueness after coverage filtering](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
+![Benchmark predictability ranking](../figures/benchmark_level/benchmark_uniqueness_vs_coverage.png)
 
 ![Clustered benchmark similarity heatmap](../figures/benchmark_level/benchmark_similarity_clustered_heatmap.png)
 
