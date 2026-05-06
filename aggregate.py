@@ -43,7 +43,7 @@ from typing import Optional
 
 DEFAULT_BASE = "./result"
 DEFAULT_OUT = "./"
-DEFAULT_MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_TIMEOUT = 1800
 DEFAULT_PARALLEL = 18
 

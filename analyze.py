@@ -713,11 +713,11 @@ def main() -> int:
                     help="root for the per-trial markdown tree (default: ./results)")
     ap.add_argument("-j", "--max-parallel", type=int, default=18,
                     help="concurrent trials per task (default: 18)")
-    ap.add_argument("-m", "--model", default="claude-opus-4-7",
+    ap.add_argument("-m", "--model", default="gpt-5.4-mini",
                     help="model to drive the audit. Names starting with "
                          "'claude' (or 'opus'/'sonnet'/'haiku') route through "
                          "the `claude` CLI; everything else routes through "
-                         "`codex exec`. Default: claude-opus-4-7.")
+                         "`codex exec`. Default: gpt-5.4-mini.")
     ap.add_argument("--reasoning-effort", default="high",
                     choices=["", "minimal", "low", "medium", "high", "xhigh", "max"],
                     help="reasoning effort. For codex passed as "
