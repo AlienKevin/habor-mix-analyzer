@@ -1,0 +1,100 @@
+---- LAW BEGIN ----
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    # Parameters fitted for the 'all_data' group
+    # Formula: L = E + (A + C * V^gamma) / N^alpha + B / D^beta
+    groups_params = {
+        'all_data': {
+            'E': -5.658019830962678,
+            'A': 80.65496388203061,
+            'B': 5834.814646256434,
+            'C': 29.922879865371257,
+            'alpha': 0.6130595553954487,
+            'beta': 0.37229123600560327,
+            'gamma': 0.5899658980191844
+        }
+    }
+    
+    # Fallback to 'all_data' if group is unknown
+    p = groups_params.get(group, groups_params['all_data'])
+    
+    E = p['E']
+    A = p['A']
+    B = p['B']
+    C = p['C']
+    alpha = p['alpha']
+    beta = p['beta']
+    gamma = p['gamma']
+    
+    predictions = []
+    for data in input_data:
+        N = data.get('non_vocab_parameters')
+        V = data.get('vocab_size')
+        D = data.get('num_characters')
+        
+        # Calculate unigram_normalized_loss according to the discovered scaling law
+        loss = E + (A + C * (V ** gamma)) / (N ** alpha) + B / (D ** beta)
+        
+        predictions.append({'unigram_normalized_loss': float(loss)})
+        
+    return predictions
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Discovery: Vocabulary Size
+
+## Mathematical Formula
+
+The mathematical formula discovered to predict the `unigram_normalized_loss` ($L$) as a function of `non_vocab_parameters` ($N$), `vocab_size` ($V$), and `num_characters` ($D$) is given by:
+
+$$ L = E + \frac{A + C \cdot V^\gamma}{N^\alpha} + \frac{B}{D^\beta} $$
+
+Where:
+* **$L$**: `unigram_normalized_loss`
+* **$N$**: Number of non-vocabulary parameters (`non_vocab_parameters`)
+* **$V$**: Vocabulary size (`vocab_size`)
+* **$D$**: Total number of characters in the training data (`num_characters`)
+* **$E$**: The irreducible loss floor.
+* **$A, B, C$**: Scaling coefficients.
+* **$\alpha, \beta, \gamma$**: Scaling exponents.
+
+## Reasoning and Methodology
+
+The standard human-derived scaling law (Chinchilla-style) for vocabulary size models the loss as an additive sum of terms for model size, dataset size, and vocabulary size: $L = E + \frac{A}{N^\alpha} + \frac{B}{D^\beta} + \frac{C}{V^\gamma}$. However, empirical tests using cross-validation over extrapolation splits revealed that this simple additive functional form generalizes poorly to new unseen regimes, particularly extrapolating to larger datasets and models.
+
+To find a more robust law, we used symbolic regression combined with L-BFGS-B parameter optimization over a large set of candidate mathematical expressions. We tested the generalization capability of each candidate function by holding out specific splits of the dataset (e.g., the largest model parameters, largest vocabulary sizes, and largest dataset sizes) and computing the $R^2$ scores on these held-out validation sets.
+
+This approach discovered that vocabulary size ($V$) interacts multiplicatively with the model parameter term. The term $\frac{A + C \cdot V^\gamma}{N^\alpha}$ reflects the underlying mechanism: expanding the vocabulary size increases the total parameter count (via the embedding layer). Thus, the difficulty of learning the tokens and the effective capacity required scale together. By incorporating vocabulary size into the numerator of the parameter term, the discovered formula accounts for the fact that a larger vocabulary shifts the effective parameters needed, allowing the law to maintain high predictive accuracy (extrapolating with $R^2 > 0.95$ across multiple dimensions) even on regimes unseen during training.
+
+## Fitted Values of the Parameters
+
+The parameters were optimized using the `all_data` experimental group using non-linear least squares estimation. The fitted values are as follows:
+
+| Parameter | Value (`all_data`) |
+| :--- | :--- |
+| **$E$** | `-5.658019830962678` |
+| **$A$** | `80.65496388203061` |
+| **$B$** | `5834.814646256434` |
+| **$C$** | `29.922879865371257` |
+| **$\alpha$** | `0.6130595553954487` |
+| **$\beta$** | `0.37229123600560327` |
+| **$\gamma$** | `0.5899658980191844` |
+
+These coefficients are generalized to predict the expected normalized loss for unseen models and data configurations.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.975154497935512

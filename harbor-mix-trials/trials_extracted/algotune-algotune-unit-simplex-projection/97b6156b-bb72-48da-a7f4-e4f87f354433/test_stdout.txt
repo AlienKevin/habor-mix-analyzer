@@ -1,0 +1,162 @@
+--- Final Solver (used for performance test) ---
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+try:
+    import numba as nb
+except Exception:  # pragma: no cover
+    nb = None
+
+
+if nb is not None:
+    @nb.njit(cache=False, fastmath=True)
+    def _project_active(y):
+        n = y.size
+        if n == 0:
+            return np.empty(0, np.float64)
+        if n == 1:
+            out = np.empty(1, np.float64)
+            out[0] = 1.0
+            return out
+
+        total = 0.0
+        for i in range(n):
+            total += y[i]
+        theta = (total - 1.0) / n
+
+        # Fixed-point active-set iterations.  This is exact once the active
+        # set stabilizes and is typically only a handful of linear scans.
+        for _ in range(64):
+            active_sum = 0.0
+            active_count = 0
+            for i in range(n):
+                value = y[i]
+                if value > theta:
+                    active_sum += value
+                    active_count += 1
+
+            if active_count == 0:
+                max_value = y[0]
+                for i in range(1, n):
+                    if y[i] > max_value:
+                        max_value = y[i]
+                theta = max_value - 1.0
+                break
+
+            new_theta = (active_sum - 1.0) / active_count
+
+            stable = True
+            for i in range(n):
+                value = y[i]
+                if (value > theta) != (value > new_theta):
+                    stable = False
+                    break
+            theta = new_theta
+            if stable:
+                break
+
+        out = np.empty(n, np.float64)
+        for i in range(n):
+            value = y[i] - theta
+            out[i] = value if value > 0.0 else 0.0
+        return out
+
+    @nb.njit(cache=False, fastmath=True)
+    def _project_sort(y):
+        n = y.size
+        if n == 0:
+            return np.empty(0, np.float64)
+        if n == 1:
+            out = np.empty(1, np.float64)
+            out[0] = 1.0
+            return out
+
+        sorted_y = np.sort(y)
+        cumulative = 0.0
+        theta = 0.0
+        for j in range(n):
+            value = sorted_y[n - 1 - j]
+            cumulative += value
+            candidate = (cumulative - 1.0) / (j + 1)
+            if value > candidate:
+                theta = candidate
+
+        out = np.empty(n, np.float64)
+        for i in range(n):
+            value = y[i] - theta
+            out[i] = value if value > 0.0 else 0.0
+        return out
+else:
+    _project_active = None
+    _project_sort = None
+
+
+def _project_numpy(y: np.ndarray) -> np.ndarray:
+    n = y.size
+    if n == 0:
+        return np.empty(0, dtype=np.float64)
+    if n == 1:
+        return np.array([1.0], dtype=np.float64)
+    sorted_y = np.sort(y)[::-1]
+    cumsum_y = np.cumsum(sorted_y) - 1.0
+    rho = np.nonzero(sorted_y > cumsum_y / np.arange(1, n + 1))[0][-1]
+    theta = cumsum_y[rho] / (rho + 1)
+    return np.maximum(y - theta, 0.0)
+
+
+class Solver:
+    def __init__(self) -> None:
+        if nb is not None:
+            sample = np.array([0.2, -0.4, 1.7, 0.3], dtype=np.float64)
+            _project_active(sample)
+            _project_sort(sample)
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, np.ndarray]:
+        y = np.asarray(problem.get("y"), dtype=np.float64).ravel()
+        n = y.size
+
+        if nb is None:
+            solution = _project_numpy(y)
+        elif n <= 1:
+            solution = _project_active(y)
+        elif n < 2048:
+            # For small inputs, the compiled exact sort has tiny overhead and
+            # avoids rare many-iteration active-set cases.
+            solution = _project_sort(y)
+        else:
+            solution = _project_active(y)
+
+            # Cheap feasibility guard.  If a pathological input prevented fast
+            # active-set convergence, fall back to the exact sort algorithm.
+            total = float(solution.sum())
+            if not (abs(total - 1.0) <= 1e-7):
+                solution = _project_sort(y)
+
+        return {"solution": solution}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 6.4293s
+Total Solver Time:   2.0137s
+Raw Speedup:         3.1928 x
+Final Reward (Score): 3.1928
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 106.00s (0:01:45) =========================

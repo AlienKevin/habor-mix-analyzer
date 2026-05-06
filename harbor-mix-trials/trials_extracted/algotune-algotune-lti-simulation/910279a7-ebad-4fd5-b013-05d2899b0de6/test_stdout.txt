@@ -1,0 +1,121 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy.signal import tf2ss
+from scipy.linalg import expm
+import numba
+
+
+@numba.njit
+def _sim_foh(x0, Ad, Bd0, Bd1, C, D, u, n_steps):
+    yout = np.empty(n_steps)
+    x = x0.copy()
+    yout[0] = np.dot(x, C) + u[0] * D
+
+    for i in range(1, n_steps):
+        x = np.dot(x, Ad) + u[i - 1] * Bd0 + u[i] * Bd1
+        yout[i] = np.dot(x, C) + u[i] * D
+
+    return yout
+
+
+@numba.njit
+def _sim_no_input(x0, Ad, C, n_steps):
+    yout = np.empty(n_steps)
+    x = x0.copy()
+    yout[0] = np.dot(x, C)
+
+    for i in range(1, n_steps):
+        x = np.dot(x, Ad)
+        yout[i] = np.dot(x, C)
+
+    return yout
+
+
+class Solver:
+    def __init__(self):
+        # Trigger numba JIT compilation
+        n = 2
+        x0 = np.zeros(n, dtype=np.float64)
+        Ad = np.eye(n, dtype=np.float64)
+        Bd0 = np.zeros(n, dtype=np.float64)
+        Bd1 = np.zeros(n, dtype=np.float64)
+        C = np.ones(n, dtype=np.float64)
+        u = np.ones(5, dtype=np.float64)
+        _sim_foh(x0, Ad, Bd0, Bd1, C, 1.0, u, 5)
+        _sim_no_input(x0, Ad, C, 5)
+
+    def solve(self, problem, **kwargs):
+        num = problem["num"]
+        den = problem["den"]
+        u_list = problem["u"]
+        t_list = problem["t"]
+
+        num_arr = np.asarray(num, dtype=np.float64)
+        den_arr = np.asarray(den, dtype=np.float64)
+        u_arr = np.asarray(u_list, dtype=np.float64)
+        t_arr = np.asarray(t_list, dtype=np.float64)
+
+        A, B, C_mat, D_mat = tf2ss(num_arr, den_arr)
+        A = A.astype(np.float64)
+        B = B.astype(np.float64)
+        C_mat = C_mat.astype(np.float64)
+        D_mat = D_mat.astype(np.float64)
+
+        n = A.shape[0]  # n_states
+        n_steps = len(u_arr)
+
+        C_flat = C_mat.ravel()
+        D_val = float(D_mat.ravel()[0])
+        x0 = np.zeros(n, dtype=np.float64)
+
+        if n_steps == 1:
+            y0 = np.dot(x0, C_flat) + u_arr[0] * D_val
+            return {"yout": [float(y0)]}
+
+        dt = float(t_arr[1] - t_arr[0])
+
+        # Zero input: simplified loop
+        if not np.any(u_arr):
+            expAT_dt = expm(A.T * dt)
+            yout = _sim_no_input(x0, expAT_dt, C_flat, n_steps)
+            return {"yout": yout.tolist()}
+
+        # FOH augmented matrix (matches scipy lsim default interp=True)
+        sz = n + 2
+        M = np.zeros((sz, sz), dtype=np.float64)
+        M[:n, :n] = A * dt
+        M[:n, n] = B[:, 0] * dt
+        M[n, n + 1] = 1.0
+
+        expMT = expm(M.T)
+
+        Ad = expMT[:n, :n].astype(np.float64)
+        Bd1 = expMT[n + 1, :n].astype(np.float64)
+        Bd0 = (expMT[n, :n] - Bd1).astype(np.float64)
+
+        yout = _sim_foh(x0, Ad, Bd0, Bd1, C_flat, D_val, u_arr, n_steps)
+
+        return {"yout": yout.tolist()}--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 9.3453s
+Total Solver Time:   0.2755s
+Raw Speedup:         33.9258 x
+Final Reward (Score): 33.9258
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 120.38s (0:02:00) =========================

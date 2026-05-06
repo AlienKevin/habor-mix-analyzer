@@ -1,0 +1,165 @@
+---- LAW BEGIN ----
+from typing import Union
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    # Scaling law parameters per group
+    # Form: L = E + A/N^alpha + B/C^beta + D*V^gamma
+    # where N = non_vocab_parameters, C = num_characters, V = vocab_size
+    group_params = {
+        "all_data": {
+            "E": -5.839346810073277,
+            "A": 80.4179759563351,
+            "alpha": 0.3185208512454037,
+            "B": 5772.99512821547,
+            "beta": 0.3716452244838036,
+            "D": 0.00013456289873160592,
+            "gamma": 0.6557525626053413,
+        }
+    }
+
+    # Use the requested group's parameters, or fall back to 'all_data' if unknown
+    if group in group_params:
+        params = group_params[group]
+    else:
+        # For unknown groups, use the all_data parameters as default
+        params = group_params["all_data"]
+    E = params["E"]
+    A = params["A"]
+    alpha = params["alpha"]
+    B = params["B"]
+    beta = params["beta"]
+    D = params["D"]
+    gamma = params["gamma"]
+
+    results = []
+    for data_point in input_data:
+        N = data_point["non_vocab_parameters"]
+        C = data_point["num_characters"]
+        V = data_point["vocab_size"]
+
+        # Chinchilla-style additive scaling law
+        # L = E + A/N^alpha + B/C^beta + D*V^gamma
+        predicted_loss = E + A / (N ** alpha) + B / (C ** beta) + D * (V ** gamma)
+
+        results.append({"unigram_normalized_loss": predicted_loss})
+
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Discovery: Vocabulary Size Effect on Language Model Performance
+
+## Mathematical Formula
+
+The discovered scaling law follows a Chinchilla-inspired additive power-law form:
+
+```
+L(N, C, V) = E + A/N^α + B/C^β + D·V^γ
+```
+
+Where:
+- **L** = unigram_normalized_loss (predicted value)
+- **N** = non_vocab_parameters (number of non-vocabulary parameters)
+- **C** = num_characters (total number of characters in training data)
+- **V** = vocab_size (vocabulary size)
+- **E, A, B, D, α, β, γ** = fitted parameters (group-specific constants)
+
+### Interpretation
+
+1. **E (Irreducible Error)**: The asymptotic loss as N, C → ∞. This represents the fundamental limit of the model's performance.
+
+2. **A/N^α (Parameter Scaling)**: The contribution of model size to performance improvement. As non-vocabulary parameters increase, this term decays to zero, following a power law with exponent α ≈ 0.32.
+
+3. **B/C^β (Data Scaling)**: The contribution of training data size to performance improvement. As the number of training characters increases, this term decays to zero with exponent β ≈ 0.37.
+
+4. **D·V^γ (Vocabulary Size Penalty)**: Unlike parameters and data, increasing vocabulary size *increases* the loss (makes performance worse). This is because larger vocabularies make the prediction task inherently harder. The term grows as V^γ with γ ≈ 0.66.
+
+## Methodology
+
+### Data Exploration
+1. Loaded the dataset using `datasets.load_from_disk()` - found 1080 data points with a single group ('all_data').
+2. Identified input variables: `vocab_size`, `non_vocab_parameters`, `num_characters`
+3. Identified output variable: `unigram_normalized_loss`
+4. Analyzed variable ranges:
+   - vocab_size: 4096 to 64512 (9 unique values)
+   - non_vocab_parameters: 33M to 1.13B (6 unique values)
+   - num_characters: 181M to 230.6B (1044 unique values)
+   - unigram_normalized_loss: -5.34 to -0.70 (negative values indicate performance better than unigram baseline)
+
+### Model Selection Process
+
+Multiple functional forms were tested:
+
+1. **Logarithmic Form**: `L = E + b·log10(N) + c·log10(C) + d·log10(V)`
+   - R² = 0.876 (poor fit)
+
+2. **Chinchilla Additive Power-Law (Selected)**: `L = E + A/N^α + B/C^β + D·V^γ`
+   - R² = 0.979 (excellent fit)
+   - This form is inspired by the Chinchilla scaling laws which model loss as a sum of power-law terms
+
+3. **Chinchilla with Log(V)**: `L = E + A/N^α + B/C^β + D·log(V)`
+   - R² = 0.979 (comparable but slightly worse)
+
+4. **Combined N×C Form**: `L = E + A/(N^α·C^β) + D·log(V)`
+   - R² = 0.979 (similar fit quality)
+
+The Chinchilla additive power-law form (Model 1) was selected for its:
+- Highest R² value (0.979398)
+- Theoretical justification from established scaling law literature
+- Clear interpretability of each term
+- Good residual distribution across all vocab sizes
+
+### Fitting Procedure
+- Used `scipy.optimize.curve_fit` for nonlinear least squares fitting
+- Initial parameter guesses based on data ranges and theoretical considerations
+- Verified fit quality via R² and residual analysis
+
+### Residual Analysis
+- Mean residual: ~0 (unbiased)
+- Standard deviation: 0.114
+- Maximum absolute residual: 0.79
+- Residuals are well-distributed across all vocab sizes (mean residuals range from -0.011 to +0.010 for different V values)
+
+## Fitted Parameters
+
+### Group: all_data
+
+| Parameter | Value | Interpretation |
+|-----------|-------|-----------------|
+| E | -5.8393 | Irreducible error (asymptotic loss) |
+| A | 80.418 | Prefactor for parameter scaling |
+| α | 0.3185 | Exponent for non_vocab_parameters |
+| B | 5773.0 | Prefactor for data scaling |
+| β | 0.3716 | Exponent for num_characters |
+| D | 1.3456×10⁻⁴ | Prefactor for vocabulary size penalty |
+| γ | 0.6558 | Exponent for vocab_size |
+
+### Parameter Uncertainties
+The fitted exponents are:
+- α ≈ 0.32 (parameter scaling is relatively weak)
+- β ≈ 0.37 (data scaling is somewhat stronger than parameter scaling)
+- γ ≈ 0.66 (vocabulary size has a sub-linear but noticeable effect)
+
+### Cross-Group Generalization
+The functional form `L = E + A/N^α + B/C^β + D·V^γ` is designed to be group-independent, with only the constant parameters (E, A, α, B, β, D, γ) varying per group. This allows the law to capture group-specific behaviors while maintaining a consistent mathematical structure.
+
+## Notes on "Unigram-Normalized Loss"
+The negative values of the loss indicate that the models are performing better than a unigram baseline. The normalization likely subtracts or divides by the unigram model's loss, so negative values represent improvements over the unigram model. The scaling law captures how this normalized loss changes with model size, data size, and vocabulary size.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9735190565993243

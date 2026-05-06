@@ -1,0 +1,61 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import torch
+
+
+class Solver:
+    def solve(self, problem, **kwargs):
+        A = problem["matrix"]
+
+        # Handle 1x1 case directly
+        if A.shape[0] == 1:
+            return {"sqrtm": {"X": np.sqrt(A.astype(complex)).tolist()}}
+
+        n = A.shape[0]
+
+        if n < 50:
+            # For small matrices, numpy eig is faster due to less overhead
+            d, V = np.linalg.eig(A)
+            sqrt_d = np.sqrt(d.astype(complex))
+            V_sqrtD = V * sqrt_d[np.newaxis, :]
+            X = V_sqrtD @ np.linalg.inv(V)
+        else:
+            # For larger matrices, torch is significantly faster
+            A_t = torch.tensor(A, dtype=torch.complex128)
+            d_t, V_t = torch.linalg.eig(A_t)
+            sqrt_d_t = torch.sqrt(d_t)
+            V_sqrtD_t = V_t * sqrt_d_t.unsqueeze(0)
+            X_t = V_sqrtD_t @ torch.linalg.inv(V_t)
+            X = X_t.numpy()
+
+        return {"sqrtm": {"X": X.tolist()}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 38.2979s
+Total Solver Time:   18.2177s
+Raw Speedup:         2.1022 x
+Final Reward (Score): 2.1022
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================ 3 passed, 1100 warnings in 1016.00s (0:16:56) =================

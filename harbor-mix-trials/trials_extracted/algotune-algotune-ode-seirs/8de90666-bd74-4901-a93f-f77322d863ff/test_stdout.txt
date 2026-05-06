@@ -1,0 +1,142 @@
+--- Final Solver (used for performance test) ---
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+from diffrax import diffeqsolve, Tsit5, Kvaerno5, ODETerm, SaveAt, PIDController
+from typing import Any
+
+# Vector field: 3-variable SEIRS model
+def _vector_field(t, y, args):
+    S, E, I = y
+    beta, sigma, gamma, omega = args
+    R = 1.0 - S - E - I
+    dS = -beta * S * I + omega * R
+    dE = beta * S * I - sigma * E
+    dI = sigma * E - gamma * I
+    return jnp.array([dS, dE, dI])
+
+@jax.jit
+def _solve_core(t0, t1, y0, params):
+    """Core JIT-compiled solver using Tsit5 (non-stiff)."""
+    term = ODETerm(_vector_field)
+    solver = Tsit5()
+    saveat = SaveAt(t1=True)
+    stepsize_controller = PIDController(rtol=1e-8, atol=1e-10)
+    
+    sol = diffeqsolve(
+        term,
+        solver,
+        t0,
+        t1,
+        dt0=None,
+        y0=y0,
+        args=params,
+        saveat=saveat,
+        stepsize_controller=stepsize_controller,
+        max_steps=10000000
+    )
+    return sol.ys[0]  # [S, E, I] at final time
+
+@jax.jit
+def _solve_core_stiff(t0, t1, y0, params):
+    """Core JIT-compiled solver using Kvaerno5 (stiff)."""
+    term = ODETerm(_vector_field)
+    solver = Kvaerno5()
+    saveat = SaveAt(t1=True)
+    stepsize_controller = PIDController(rtol=1e-8, atol=1e-10)
+    
+    sol = diffeqsolve(
+        term,
+        solver,
+        t0,
+        t1,
+        dt0=None,
+        y0=y0,
+        args=params,
+        saveat=saveat,
+        stepsize_controller=stepsize_controller,
+        max_steps=10000000
+    )
+    return sol.ys[0]
+
+class Solver:
+    def __init__(self):
+        # Warm-up JIT compilation (not counted in solve time)
+        t0 = 0.0
+        t1 = 1.0
+        y0 = jnp.array([0.8, 0.05, 0.05], dtype=jnp.float64)
+        params = jnp.array([0.1, 0.1, 0.1, 0.01], dtype=jnp.float64)
+        
+        try:
+            _solve_core(t0, t1, y0, params)
+        except Exception:
+            pass
+        
+        try:
+            _solve_core_stiff(t0, t1, y0, params)
+        except Exception:
+            pass
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> list[float]:
+        """Solve SEIRS epidemic model.
+        
+        Args:
+            problem: Dictionary with keys:
+                - t0: initial time (float)
+                - t1: final time (float)
+                - y0: initial conditions [S0, E0, I0, R0] (list of 4 floats)
+                - params: dictionary with beta, sigma, gamma, omega (floats)
+        
+        Returns:
+            List of 4 floats [S, E, I, R] at final time t1.
+        """
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        y0_list = problem["y0"]
+        params_dict = problem["params"]
+        
+        y0_arr = jnp.array([y0_list[0], y0_list[1], y0_list[2]], dtype=jnp.float64)
+        params_arr = jnp.array([
+            params_dict["beta"],
+            params_dict["sigma"],
+            params_dict["gamma"],
+            params_dict["omega"]
+        ], dtype=jnp.float64)
+        
+        # Try non-stiff solver first
+        try:
+            result = _solve_core(t0, t1, y0_arr, params_arr)
+        except Exception:
+            # Fallback to stiff solver
+            result = _solve_core_stiff(t0, t1, y0_arr, params_arr)
+        
+        S = float(result[0])
+        E = float(result[1])
+        I = float(result[2])
+        R = 1.0 - S - E - I
+        
+        return [S, E, I, R]
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.7748s
+Total Solver Time:   0.1534s
+Raw Speedup:         50.6711 x
+Final Reward (Score): 50.6711
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 100.95s (0:01:40) =========================

@@ -1,0 +1,67 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from typing import Any
+
+
+class Solver:
+    def solve(self, problem: dict, **kwargs) -> dict:
+        """
+        Solve the Euclidean projection onto the probability simplex.
+        
+        minimize_x (1/2) ||x - y||^2
+        subject to x^T 1 = 1, x >= 0
+        
+        Uses the O(n log n) algorithm with binary search on k.
+        """
+        y = np.asarray(problem["y"], dtype=np.float64).ravel()
+        n = y.size
+
+        # Sort ascending (avoid descending copy from [::-1])
+        sorted_y = np.sort(y)
+
+        # Cumulative sum of descending order, minus 1
+        # sorted_y is ascending, so descending index is n-1-i
+        cumsum_y = sorted_y[::-1].cumsum() - 1.0
+
+        # Binary search on k to find rho
+        # (largest k such that sorted_y[n-1-k] * (k+1) > cumsum_y[k])
+        lo, hi = 0, n - 1
+        rho = 0
+        while lo <= hi:
+            mid = (lo + hi) >> 1
+            if sorted_y[n - 1 - mid] * (mid + 1) > cumsum_y[mid]:
+                rho = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+
+        theta = cumsum_y[rho] / (rho + 1)
+
+        # Projection: x = max(y - theta, 0)
+        x = y - theta
+        np.maximum(x, 0.0, out=x)
+        return {"solution": x}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 6.2901s
+Total Solver Time:   5.6665s
+Raw Speedup:         1.1101 x
+Final Reward (Score): 1.1101
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 144.26s (0:02:24) =========================

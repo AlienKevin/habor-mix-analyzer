@@ -1,0 +1,121 @@
+--- Final Solver (used for performance test) ---
+import os
+os.environ['JAX_ENABLE_X64'] = '1'
+
+import numpy as np
+import jax
+import jax.numpy as jnp
+from diffrax import diffeqsolve, ODETerm, Dopri5, PIDController, SaveAt
+from typing import Any
+
+
+def _seirs_rhs(t, y, args):
+    beta, sigma, gamma, omega = args
+    S, E, I, R = y[0], y[1], y[2], y[3]
+    SI = beta * S * I
+    return jnp.array([-SI + omega * R,
+                       SI - sigma * E,
+                       sigma * E - gamma * I,
+                       gamma * I - omega * R])
+
+
+@jax.jit
+def _solve_jax(t0, t1, y0, params):
+    term = ODETerm(_seirs_rhs)
+    solver = Dopri5()
+    stepsize_controller = PIDController(rtol=1e-10, atol=1e-12)
+    saveat = SaveAt(t1=True)
+    sol = diffeqsolve(
+        term, solver,
+        t0=t0, t1=t1, dt0=0.1, y0=y0,
+        args=params,
+        saveat=saveat,
+        stepsize_controller=stepsize_controller,
+        max_steps=1000000,
+    )
+    return sol.ys[0]
+
+
+def _seirs_rhs_py(t, y, beta, sigma, gamma, omega):
+    S, E, I, R = y
+    SI = beta * S * I
+    return [-SI + omega * R, SI - sigma * E, sigma * E - gamma * I, gamma * I - omega * R]
+
+
+class Solver:
+    def __init__(self):
+        # Warm up JAX JIT compilation
+        _y0 = jnp.array([0.9, 0.05, 0.03, 0.02], dtype=jnp.float64)
+        _params = jnp.array([0.3, 0.2, 0.1, 0.001], dtype=jnp.float64)
+        result = _solve_jax(jnp.float64(0.0), jnp.float64(1.0), _y0, _params)
+        result.block_until_ready()
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> Any:
+        y0_arr = np.array(problem['y0'], dtype=np.float64)
+        t0_val = float(problem['t0'])
+        t1_val = float(problem['t1'])
+        params = problem['params']
+
+        # Try JAX/diffrax first (much faster)
+        try:
+            y0_jax = jnp.array(y0_arr, dtype=jnp.float64)
+            p_jax = jnp.array(
+                [params['beta'], params['sigma'], params['gamma'], params['omega']],
+                dtype=jnp.float64,
+            )
+            # Use jnp.float64 to avoid JIT recompilation
+            t0_jax = jnp.float64(t0_val)
+            t1_jax = jnp.float64(t1_val)
+
+            y_final = _solve_jax(t0_jax, t1_jax, y0_jax, p_jax)
+            y_final_np = np.array(y_final, dtype=np.float64)
+
+            if not np.all(np.isfinite(y_final_np)):
+                raise ValueError("Non-finite result from JAX solver")
+
+        except Exception:
+            # Fallback to scipy
+            from scipy.integrate import solve_ivp
+            sol = solve_ivp(
+                _seirs_rhs_py,
+                [t0_val, t1_val],
+                y0_arr.tolist(),
+                method='DOP853',
+                rtol=1e-10,
+                atol=1e-12,
+                args=(params['beta'], params['sigma'], params['gamma'], params['omega']),
+            )
+            if not sol.success:
+                raise RuntimeError(f"Solver failed: {sol.message}")
+            y_final_np = sol.y[:, -1].copy()
+
+        # Enforce conservation law: S + E + I + R = 1
+        total = y_final_np.sum()
+        if total > 0:
+            y_final_np /= total
+
+        return y_final_np.tolist()
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.5795s
+Total Solver Time:   0.1641s
+Raw Speedup:         46.1835 x
+Final Reward (Score): 46.1835
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+========================= 3 passed in 96.56s (0:01:36) =========================

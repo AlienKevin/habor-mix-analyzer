@@ -1,0 +1,203 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from numba import njit
+from typing import Any
+
+
+@njit(cache=True)
+def _project_simplex_numba(y: np.ndarray) -> np.ndarray:
+    """Numba-compiled simplex projection - no intermediate arrays."""
+    n = y.shape[0]
+    sorted_y = np.sort(y)[::-1]
+
+    cumsum = 0.0
+    rho = 0
+    for j in range(n):
+        cumsum += sorted_y[j]
+        if sorted_y[j] * (j + 1) > cumsum - 1.0:
+            rho = j
+
+    cumsum_rho = 0.0
+    for j in range(rho + 1):
+        cumsum_rho += sorted_y[j]
+    theta = (cumsum_rho - 1.0) / (rho + 1)
+
+    x = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        val = y[i] - theta
+        x[i] = val if val > 0.0 else 0.0
+    return x
+
+
+@njit(cache=True)
+def _find_rho_and_project(sorted_y: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Find rho and project - avoids intermediate arrays for large inputs."""
+    n = y.shape[0]
+
+    cumsum = 0.0
+    rho = 0
+    for j in range(n):
+        cumsum += sorted_y[j]
+        if sorted_y[j] * (j + 1) > cumsum - 1.0:
+            rho = j
+
+    cumsum_rho = 0.0
+    for j in range(rho + 1):
+        cumsum_rho += sorted_y[j]
+    theta = (cumsum_rho - 1.0) / (rho + 1)
+
+    x = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        val = y[i] - theta
+        x[i] = val if val > 0.0 else 0.0
+    return x
+
+
+class Solver:
+    def __init__(self):
+        warmup = np.array([1.0, 1.2, 0.5])
+        _project_simplex_numba(warmup)
+        _find_rho_and_project(np.sort(warmup)[::-1], warmup)
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, Any]:
+        y = np.asarray(problem["y"], dtype=np.float64).ravel()
+        n = len(y)
+
+        if n <= 2000:
+            # Fully numba-compiled for small/medium arrays
+            x = _project_simplex_numba(y)
+        else:
+            # numpy sort (highly optimized C) + numba for post-sort
+            sorted_y = np.sort(y)[::-1]
+            x = _find_rho_and_project(sorted_y, y)
+
+        return {"solution": x}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:58: in __init__
+    _project_simplex_numba(warmup)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7715383b40e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:58: in __init__
+    _project_simplex_numba(warmup)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7715383b40e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 0.57s ==========================

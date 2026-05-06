@@ -1,0 +1,102 @@
+--- Final Solver (used for performance test) ---
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+from diffrax import diffeqsolve, ODETerm, Dopri5, SaveAt, PIDController
+import numpy as np
+from typing import Any
+
+def seirs_jax(t, y, args):
+    beta, sigma, gamma, omega = args
+    S, E, I, R = y
+    dS = -beta * S * I + omega * R
+    dE = beta * S * I - sigma * E
+    dI = sigma * E - gamma * I
+    dR = gamma * I - omega * R
+    return jnp.stack([dS, dE, dI, dR])
+
+term = ODETerm(seirs_jax)
+solver = Dopri5()
+saveat = SaveAt(t1=True)
+stepsize_controller = PIDController(rtol=1e-8, atol=1e-8)
+
+@jax.jit
+def _solve_diffrax(y0, t0, t1, args):
+    sol = diffeqsolve(
+        term, solver, t0=t0, t1=t1, dt0=None, y0=y0, args=args,
+        saveat=saveat, stepsize_controller=stepsize_controller,
+        max_steps=1000000
+    )
+    return sol.ys[0]
+
+class Solver:
+    def __init__(self):
+        # Trigger compilation
+        try:
+            y0_dummy = jnp.array([0.89, 0.01, 0.005, 0.095], dtype=jnp.float64)
+            args_dummy = jnp.array([0.35, 0.2, 0.1, 0.002], dtype=jnp.float64)
+            _solve_diffrax(y0_dummy, 0.0, 10.0, args_dummy).block_until_ready()
+        except Exception:
+            pass
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> Any:
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        y0_list = problem["y0"]
+        
+        if t0 == t1:
+            return y0_list
+
+        try:
+            y0 = jnp.array(y0_list, dtype=jnp.float64)
+            params = problem["params"]
+            args = jnp.array([params["beta"], params["sigma"], params["gamma"], params["omega"]], dtype=jnp.float64)
+            
+            res = _solve_diffrax(y0, t0, t1, args)
+            res = np.array(res)
+            res = res / np.sum(res)
+            return res.tolist()
+        except Exception:
+            from scipy.integrate import odeint
+            def seirs_odeint(y, t, beta, sigma, gamma, omega):
+                S, E, I, R = y
+                dS = -beta * S * I + omega * R
+                dE = beta * S * I - sigma * E
+                dI = sigma * E - gamma * I
+                dR = gamma * I - omega * R
+                return [dS, dE, dI, dR]
+            params = problem["params"]
+            res = odeint(
+                seirs_odeint, 
+                y0_list, 
+                [t0, t1], 
+                args=(params["beta"], params["sigma"], params["gamma"], params["omega"]),
+                rtol=1e-8, 
+                atol=1e-8
+            )[-1]
+            res = res / np.sum(res)
+            return res.tolist()
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.8471s
+Total Solver Time:   0.1109s
+Raw Speedup:         70.7456 x
+Final Reward (Score): 70.7456
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 100.78s (0:01:40) =========================

@@ -1,0 +1,105 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy.integrate import solve_ivp
+import numba as nb
+
+@nb.njit
+def _rhs(t, y, beta, sigma, gamma, omega):
+    S, E, I = y
+    R = 1.0 - S - E - I
+    dS = -beta * S * I + omega * R
+    dE = beta * S * I - sigma * E
+    dI = sigma * E - gamma * I
+    return np.array([dS, dE, dI])
+
+@nb.njit
+def _jac(t, y, beta, sigma, gamma, omega):
+    S, E, I = y
+    J = np.empty((3, 3))
+    J[0, 0] = -beta * I - omega
+    J[0, 1] = -omega
+    J[0, 2] = -beta * S - omega
+    J[1, 0] = beta * I
+    J[1, 1] = -sigma
+    J[1, 2] = beta * S
+    J[2, 0] = 0.0
+    J[2, 1] = sigma
+    J[2, 2] = -gamma
+    return J
+
+def _warmup_numba():
+    """Pre-compile numba functions"""
+    y = np.array([0.5, 0.1, 0.05])
+    _rhs(0.0, y, 0.35, 0.2, 0.1, 0.002)
+    _jac(0.0, y, 0.35, 0.2, 0.1, 0.002)
+
+# Pre-compile on module load
+_warmup_numba()
+
+class Solver:
+    def __init__(self):
+        # Ensure numba functions are compiled
+        _warmup_numba()
+    
+    def solve(self, problem, **kwargs):
+        t0 = problem['t0']
+        t1 = problem['t1']
+        y0 = problem['y0']
+        params = problem['params']
+        beta = params['beta']
+        sigma = params['sigma']
+        gamma = params['gamma']
+        omega = params['omega']
+        
+        S0, E0, I0, _ = y0
+        y0_red = np.array([S0, E0, I0])
+        
+        def rhs(t, y):
+            return _rhs(t, y, beta, sigma, gamma, omega)
+        
+        def jac(t, y):
+            return _jac(t, y, beta, sigma, gamma, omega)
+        
+        # Use Radau with Jacobian for stiff system
+        sol = solve_ivp(rhs, (t0, t1), y0_red, method='Radau',
+                        jac=jac, rtol=1e-6, atol=1e-9,
+                        dense_output=False)
+        
+        if sol.success:
+            S, E, I = sol.y[:, -1]
+            R = 1.0 - S - E - I
+            return [S, E, I, R]
+        
+        # Fallback: LSODA
+        sol = solve_ivp(rhs, (t0, t1), y0_red, method='LSODA',
+                        rtol=1e-6, atol=1e-9, dense_output=False)
+        if sol.success:
+            S, E, I = sol.y[:, -1]
+            R = 1.0 - S - E - I
+            return [S, E, I, R]
+        
+        raise RuntimeError('Integration failed')
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.5967s
+Total Solver Time:   5.9423s
+Raw Speedup:         1.2784 x
+Final Reward (Score): 1.2784
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 160.57s (0:02:40) =========================

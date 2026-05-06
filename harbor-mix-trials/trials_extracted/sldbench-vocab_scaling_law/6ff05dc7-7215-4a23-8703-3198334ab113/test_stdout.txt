@@ -1,0 +1,175 @@
+---- LAW BEGIN ----
+import math
+
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predict unigram_normalized_loss from vocabulary size, non-vocabulary
+    parameter count, and number of training characters.
+
+    The fitted law is a power law in model size and data size whose
+    coefficients are quadratic functions of log vocabulary size.
+    """
+    # Reference scales used during fitting.
+    P0 = 1.0e8
+    D0 = 1.0e9
+    V0 = 16000.0
+
+    # Coefficients for group "all_data".  The same values are used as a
+    # sensible default for unseen group labels because only this group was
+    # present in the provided data.
+    params = {
+        "all_data": {
+            "a": 0.5,
+            "b": 0.45,
+            # Terms are ordered as:
+            # 1, z, z^2,
+            # p^-a, p^-a z, p^-a z^2,
+            # d^-b, d^-b z, d^-b z^2,
+            # p^-a d^-b, p^-a d^-b z, p^-a d^-b z^2
+            "coef": [
+                -5.66704902,
+                -0.09704302,
+                0.07098984,
+                0.38863925,
+                0.02932071,
+                -0.03343835,
+                2.83107939,
+                0.41683616,
+                -0.06375889,
+                -0.39139852,
+                -0.09860949,
+                0.01957781,
+            ],
+        }
+    }
+    par = params.get(group, params["all_data"])
+    a = par["a"]
+    b = par["b"]
+    c = par["coef"]
+
+    out: list[dict[str, float]] = []
+    for row in input_data:
+        P = float(row["non_vocab_parameters"])
+        V = float(row["vocab_size"])
+        D = float(row["num_characters"])
+        # Guard against invalid non-positive values without changing normal use.
+        P = max(P, 1e-12)
+        V = max(V, 1e-12)
+        D = max(D, 1e-12)
+
+        pterm = (P / P0) ** (-a)
+        dterm = (D / D0) ** (-b)
+        z = math.log(V / V0)
+        z2 = z * z
+
+        features = [
+            1.0,
+            z,
+            z2,
+            pterm,
+            pterm * z,
+            pterm * z2,
+            dterm,
+            dterm * z,
+            dterm * z2,
+            pterm * dterm,
+            pterm * dterm * z,
+            pterm * dterm * z2,
+        ]
+        pred = sum(ci * xi for ci, xi in zip(c, features))
+        out.append({"unigram_normalized_loss": float(pred)})
+    return out
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Discovered scaling law
+
+The provided data contained one experimental group, `all_data`, with a complete grid over:
+
+- non-vocabulary parameters `P = non_vocab_parameters`,
+- vocabulary size `V = vocab_size`, and
+- training characters `D = num_characters`.
+
+The target is `unigram_normalized_loss`.
+
+## Formula
+
+I fit the following common functional form for neural scaling laws: a power law in model size and data size, with the vocabulary dependence represented by a low-order polynomial in log vocabulary size.
+
+Let
+
+\[
+p = P/10^8, \qquad d = D/10^9, \qquad z = \log(V/16000).
+\]
+
+The prediction is
+
+\[
+\hat L(P,V,D) = \sum_{i=0}^{2} c_i z^i
++ p^{-a}\sum_{i=0}^{2} u_i z^i
++ d^{-b}\sum_{i=0}^{2} v_i z^i
++ p^{-a}d^{-b}\sum_{i=0}^{2} w_i z^i .
+\]
+
+Equivalently, it is a linear model in the twelve features
+
+\[
+1,z,z^2,p^{-a},p^{-a}z,p^{-a}z^2,d^{-b},d^{-b}z,d^{-b}z^2,p^{-a}d^{-b},p^{-a}d^{-b}z,p^{-a}d^{-b}z^2.
+\]
+
+The fitted exponents are:
+
+\[
+a = 0.5, \qquad b = 0.45.
+\]
+
+## Fitted coefficients
+
+Only one group was present in the supplied dataset.
+
+### Group: `all_data`
+
+| coefficient | value |
+|---|---:|
+| `c0` | -5.66704902 |
+| `c1` | -0.09704302 |
+| `c2` | 0.07098984 |
+| `u0` | 0.38863925 |
+| `u1` | 0.02932071 |
+| `u2` | -0.03343835 |
+| `v0` | 2.83107939 |
+| `v1` | 0.41683616 |
+| `v2` | -0.06375889 |
+| `w0` | -0.39139852 |
+| `w1` | -0.09860949 |
+| `w2` | 0.01957781 |
+
+These coefficients correspond to the feature order listed above.
+
+## Methodology
+
+I first inspected the grid structure and found 1080 observations: 6 model sizes, 9 vocabulary sizes, and 20 data sizes for each `(P,V)` pair.  The loss decreased approximately linearly with inverse powers of model size and dataset size, which is the usual empirical shape of language-model scaling curves.  Vocabulary effects were weaker but systematic and were smooth in `log(V)`.
+
+I compared several candidate laws:
+
+1. polynomial regression in `(log P, log V, log D)`,
+2. additive power laws in `P`, `D`, and `V`, and
+3. power laws in `P` and `D` whose coefficients vary smoothly with `log V`.
+
+High-degree log-polynomial fits gave lower training error but extrapolated poorly when holding out the smallest or largest grid values.  The selected formula above was chosen because it kept the standard scaling-law power dependence on `P` and `D`, captured vocabulary effects with a stable quadratic in `log V`, and gave better extrapolative validation behavior.
+
+For the final selected model, a grid search over the exponents found a stable optimum near `a = 0.5`, `b = 0.45`.  With those exponents fixed, the twelve linear coefficients were fit by least squares on all rows of `all_data`.
+
+The fitted training RMSE was approximately `0.0797` in unigram-normalized-loss units.  Extrapolative holdout checks gave RMSEs of roughly:
+
+- largest model-size holdout: `0.053`,
+- largest vocabulary-size holdout: `0.085`,
+- smallest vocabulary-size holdout: `0.075`,
+- largest data-size points per curve: `0.056`,
+- smallest data-size points per curve: `0.193`.
+
+The submitted `law.py` uses the `all_data` parameters for any unseen group label, because no other group was available in the dataset.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9876274786275299

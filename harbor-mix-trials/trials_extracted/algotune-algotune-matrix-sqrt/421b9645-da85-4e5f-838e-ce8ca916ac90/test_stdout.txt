@@ -1,0 +1,202 @@
+--- Final Solver (used for performance test) ---
+import logging
+import numpy as np
+from scipy import linalg as la
+
+try:
+    from numba import njit
+
+    @njit(cache=True)
+    def _sqrt_triu_numba(T):
+        """Numba-JIT compiled triangular sqrt — zero Python overhead."""
+        n = T.shape[0]
+        R = np.zeros((n, n), dtype=np.complex128)
+        for i in range(n):
+            R[i, i] = np.sqrt(T[i, i])
+
+        for j in range(1, n):
+            rjj = R[j, j]
+            for i in range(j - 1, -1, -1):
+                rii = R[i, i]
+                denom = rii + rjj
+                if np.abs(denom) < 1e-12:
+                    R[0, 0] = np.nan + 1j * np.nan
+                    return R
+                s = np.complex128(0.0)
+                for k in range(i + 1, j):
+                    s += R[i, k] * R[k, j]
+                R[i, j] = (T[i, j] - s) / denom
+        return R
+
+    _HAS_NUMBA = True
+except Exception:
+    _HAS_NUMBA = False
+
+logger = logging.getLogger(__name__)
+
+
+class Solver:
+    """Fast principal matrix square root solver.
+
+    Strategy (in priority order):
+    1. eigh for Hermitian matrices — specialized, 5-10x faster
+    2. Schur + Numba triangular sqrt for general matrices
+    3. scipy.sqrtm as robust fallback
+    """
+
+    def __init__(self):
+        if _HAS_NUMBA:
+            # Pre-compile Numba function so JIT cost is in init, not solve
+            try:
+                dummy = np.eye(4, dtype=np.complex128)
+                dummy[0, 1] = 1.0
+                _sqrt_triu_numba(dummy)
+            except Exception:
+                pass
+
+    def solve(self, problem, **kwargs):
+        A = np.asarray(problem["matrix"], dtype=complex)
+        n = A.shape[0]
+
+        # Tiny matrices: sqrtm overhead is negligible
+        if n <= 4:
+            try:
+                X, _ = la.sqrtm(A, disp=False)
+                if not np.all(np.isfinite(X)):
+                    return {"sqrtm": {"X": []}}
+                return {"sqrtm": {"X": X.tolist()}}
+            except Exception as e:
+                logger.error(f"sqrtm failed: {e}")
+                return {"sqrtm": {"X": []}}
+
+        # Fast path 1: Hermitian -> eigh
+        result = self._try_hermitian(A)
+        if result is not None:
+            return result
+
+        # Fast path 2: Schur + custom triangular sqrt
+        result = self._try_schur(A)
+        if result is not None:
+            return result
+
+        # Robust fallback: scipy's Schur-based sqrtm
+        try:
+            X, _ = la.sqrtm(A, disp=False)
+            if not np.all(np.isfinite(X)):
+                return {"sqrtm": {"X": []}}
+            return {"sqrtm": {"X": X.tolist()}}
+        except Exception as e:
+            logger.error(f"sqrtm failed: {e}")
+            return {"sqrtm": {"X": []}}
+
+    @staticmethod
+    def _try_hermitian(A):
+        """eigh for Hermitian matrices — 5-10x faster than general eig."""
+        # Cheap pre-check: diagonal of a Hermitian matrix must be real
+        if not np.allclose(np.diag(A).imag, 0, atol=1e-10):
+            return None
+        if not np.allclose(A, A.conj().T, rtol=1e-7, atol=1e-10):
+            return None
+        try:
+            eigvals, eigvecs = la.eigh(A, check_finite=False, driver="evd")
+            sqrt_ev = np.sqrt(eigvals.astype(complex))
+            X = (eigvecs * sqrt_ev) @ eigvecs.conj().T
+            return {"sqrtm": {"X": X.tolist()}}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _try_schur(A):
+        """Schur decomposition + Numba-accelerated triangular sqrt.
+
+        The algorithm is mathematically exact (up to floating-point),
+        so no X@X verification is needed. The only failure mode
+        (eigenvalue square roots summing to ~0) is caught inline.
+        """
+        try:
+            T, Z = la.schur(A, output="complex")
+            if _HAS_NUMBA:
+                R = _sqrt_triu_numba(T)
+                if np.isnan(R[0, 0].real) and np.isnan(R[0, 0].imag):
+                    return None
+            else:
+                R = Solver._sqrt_triu_python(T)
+                if R is None:
+                    return None
+
+            X = Z @ R @ Z.conj().T
+            if not np.all(np.isfinite(X)):
+                return None
+
+            return {"sqrtm": {"X": X.tolist()}}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _sqrt_triu_python(T):
+        """Pure-Python fallback for triangular sqrt."""
+        n = T.shape[0]
+        R = np.zeros((n, n), dtype=complex)
+        rd = np.sqrt(np.diag(T))
+        for i in range(n):
+            R[i, i] = rd[i]
+
+        for j in range(1, n):
+            rjj = rd[j]
+            for i in range(j - 1, -1, -1):
+                rii = rd[i]
+                denom = rii + rjj
+                if abs(denom) < 1e-12:
+                    return None
+                R[i, j] = (
+                    T[i, j] - np.dot(R[i, i + 1 : j], R[i + 1 : j, j])
+                ) / denom
+
+        return R
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 67.0907s
+Total Solver Time:   97.7748s
+Raw Speedup:         0.6862 x
+Final Reward (Score): 1.0000
+---------------------------
+.F
+
+=================================== FAILURES ===================================
+_____________________________ test_solver_speedup ______________________________
+
+performance_results = {'raw_speedup': 0.6861758885018985, 'speedup': 1.0, 'validity': True}
+
+    def test_solver_speedup(performance_results):
+        """Checks if the solver effectively optimized the code."""
+>       assert performance_results["raw_speedup"] > 1.0, \
+            f"Solver was not faster than baseline (Speedup: {performance_results['raw_speedup']:.2f}x)"
+E       AssertionError: Solver was not faster than baseline (Speedup: 0.69x)
+E       assert 0.6861758885018985 > 1.0
+
+/tests/test_outputs.py:198: AssertionError
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+test_outputs.py: 1100 warnings
+  /app/solver.py:83: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = la.sqrtm(A, disp=False)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+FAILED ../tests/test_outputs.py::test_solver_speedup - AssertionError: Solver...
+=========== 1 failed, 2 passed, 2200 warnings in 2583.76s (0:43:03) ============

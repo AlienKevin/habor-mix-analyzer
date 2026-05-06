@@ -1,0 +1,85 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from numba import njit
+from typing import Any
+
+@njit(cache=True)
+def project_simplex_duchi_3way(y):
+    n = y.shape[0]
+    arr = y.copy()
+    left = 0
+    right = n - 1
+    s = 0.0
+    rho = 0
+    
+    while left <= right:
+        pivot_idx = left + (right - left) // 2
+        pivot = arr[pivot_idx]
+        
+        i = left
+        j = left
+        k = right
+        while j <= k:
+            if arr[j] > pivot:
+                arr[i], arr[j] = arr[j], arr[i]
+                i += 1
+                j += 1
+            elif arr[j] < pivot:
+                arr[j], arr[k] = arr[k], arr[j]
+                k -= 1
+            else:
+                j += 1
+                
+        delta_rho = k - left + 1
+        delta_s = 0.0
+        for idx in range(left, k + 1):
+            delta_s += arr[idx]
+            
+        if (s + delta_s - 1.0) / (rho + delta_rho) < pivot:
+            s += delta_s
+            rho += delta_rho
+            left = k + 1
+        else:
+            right = i - 1
+            
+    theta = (s - 1.0) / rho
+    x = np.empty(n)
+    for idx in range(n):
+        val = y[idx] - theta
+        x[idx] = val if val > 0 else 0.0
+    return x
+
+class Solver:
+    def __init__(self):
+        # Warmup the JIT compiler so it doesn't count towards solve time
+        dummy_y = np.array([1.0, 2.0], dtype=np.float64)
+        project_simplex_duchi_3way(dummy_y)
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, Any]:
+        y = np.array(problem.get("y"), dtype=np.float64).flatten()
+        x = project_simplex_duchi_3way(y)
+        return {"solution": x}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 6.9771s
+Total Solver Time:   2.7028s
+Raw Speedup:         2.5814 x
+Final Reward (Score): 2.5814
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 190.84s (0:03:10) =========================

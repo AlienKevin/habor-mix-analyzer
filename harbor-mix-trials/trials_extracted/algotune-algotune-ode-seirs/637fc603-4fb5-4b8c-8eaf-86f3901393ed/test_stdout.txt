@@ -1,0 +1,93 @@
+--- Final Solver (used for performance test) ---
+import jax
+import jax.numpy as jnp
+from jax.experimental.ode import odeint
+import numpy as np
+from scipy.integrate import odeint as scipy_odeint
+
+jax.config.update("jax_enable_x64", True)
+
+def _rhs(y, t, beta, sigma, gamma, omega):
+    S, E, I, R = y[0], y[1], y[2], y[3]
+    infection = beta * S * I
+    dS = -infection + omega * R
+    dE = infection - sigma * E
+    dI = sigma * E - gamma * I
+    dR = gamma * I - omega * R
+    return jnp.array([dS, dE, dI, dR])
+
+@jax.jit
+def _solve_jax(y0, t0, t1, beta, sigma, gamma, omega):
+    result = odeint(_rhs, y0, jnp.array([t0, t1]),
+                   beta, sigma, gamma, omega,
+                   rtol=1e-6, atol=1e-8)
+    return result[-1]
+
+def _solve_scipy(problem):
+    t0 = problem["t0"]
+    t1 = problem["t1"]
+    y0 = np.array(problem["y0"], dtype=np.float64)
+    params = problem["params"]
+    beta = params["beta"]
+    sigma = params["sigma"]
+    gamma = params["gamma"]
+    omega = params["omega"]
+    def rhs(y, t):
+        S, E, I, R = y
+        infection = beta * S * I
+        dS = -infection + omega * R
+        dE = infection - sigma * E
+        dI = sigma * E - gamma * I
+        dR = gamma * I - omega * R
+        return [dS, dE, dI, dR]
+    result = scipy_odeint(rhs, y0, [t0, t1], rtol=1e-8, atol=1e-10)
+    return result[-1].tolist()
+
+class Solver:
+    def __init__(self):
+        # Warmup JAX JIT compilation during init (doesn't count towards runtime)
+        y0 = jnp.array([0.5, 0.1, 0.1, 0.3])
+        _ = _solve_jax(y0, 0.0, 1.0, 0.1, 0.1, 0.1, 0.01)
+
+    def solve(self, problem, **kwargs):
+        try:
+            t0 = float(problem["t0"])
+            t1 = float(problem["t1"])
+            y0 = jnp.array(problem["y0"], dtype=jnp.float64)
+            params = problem["params"]
+            beta = float(params["beta"])
+            sigma = float(params["sigma"])
+            gamma = float(params["gamma"])
+            omega = float(params["omega"])
+            result = _solve_jax(y0, t0, t1, beta, sigma, gamma, omega)
+            result.block_until_ready()
+            result_list = result.tolist()
+            if not all(np.isfinite(r) for r in result_list):
+                return _solve_scipy(problem)
+            return result_list
+        except Exception:
+            return _solve_scipy(problem)
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.6654s
+Total Solver Time:   0.1097s
+Raw Speedup:         69.8835 x
+Final Reward (Score): 69.8835
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+========================= 3 passed in 95.58s (0:01:35) =========================

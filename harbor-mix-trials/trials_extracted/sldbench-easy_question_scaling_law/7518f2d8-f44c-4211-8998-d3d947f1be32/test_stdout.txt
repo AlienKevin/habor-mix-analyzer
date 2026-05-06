@@ -1,0 +1,183 @@
+---- LAW BEGIN ----
+import math
+
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts brier_score based on flops/log_flops according to a scaling law.
+
+    Formula: brier_score = a + b * log10(flops) + c * log10(flops)^2
+
+    Coefficients are group-specific, fitted via least squares on the training data.
+    """
+    COEFFS = {
+        "abstract_narrative_understanding": {
+            "a": -0.543140714074,
+            "b": 0.184726990056,
+            "c": -0.001002095719,
+        },
+        "analogical_similarity": {
+            "a": -0.540575053774,
+            "b": 0.027911287483,
+            "c": -0.019175879673,
+        },
+        "arc": {
+            "a": -0.107112232715,
+            "b": 0.117619490399,
+            "c": -0.036868206394,
+        },
+        "arithmetic": {
+            "a": -0.247532677712,
+            "b": 0.235370097975,
+            "c": -0.129978149629,
+        },
+        "conceptual_combinations": {
+            "a": -0.409345543131,
+            "b": 0.096925955229,
+            "c": -0.071483567065,
+        },
+        "hellaswag": {
+            "a": -0.067196861546,
+            "b": 0.098051454349,
+            "c": -0.033670645756,
+        },
+        "hindu_knowledge": {
+            "a": -0.410317419378,
+            "b": -0.031143510555,
+            "c": -0.034402388960,
+        },
+        "mmlu": {
+            "a": -0.480364650220,
+            "b": -0.062970434888,
+            "c": 0.011476264281,
+        },
+        "parsinlu_qa_mc": {
+            "a": -0.434950718068,
+            "b": 0.098905837326,
+            "c": -0.056567395374,
+        },
+    }
+
+    if group not in COEFFS:
+        raise ValueError(f"Unknown group: {group}")
+
+    c = COEFFS[group]
+    results = []
+
+    for point in input_data:
+        if "log_flops" in point:
+            x = point["log_flops"]
+        elif "flops" in point:
+            x = math.log10(point["flops"])
+        else:
+            raise ValueError("Input must contain 'flops' or 'log_flops'")
+
+        brier = c["a"] + c["b"] * x + c["c"] * x * x
+        results.append({"brier_score": brier})
+
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Analysis for Model Parallelism
+
+## Mathematical Formula
+
+The discovered scaling law predicts the Brier score (a language model evaluation metric based on proper scoring rules) as a quadratic function of the base-10 logarithm of FLOPs:
+
+$$\text{brier\_score} = a_g + b_g \cdot \log_{10}(\text{flops}) + c_g \cdot (\log_{10}(\text{flops}))^2$$
+
+where $a_g$, $b_g$, and $c_g$ are group-specific coefficients fitted from the training data.
+
+This functional form generalizes the classic power-law scaling observed in neural language models. In standard scaling laws (Kaplan et al., Hoffmann et al.), the relationship between loss $L$ and compute $C$ follows $L(C) \propto C^{-\alpha}$, which manifests as a straight line in log-log space. The quadratic term $c_g \cdot (\log_{10}(\text{flops}))^2$ captures curvature arising from the approach to irreducible error -- as compute increases, the model's performance approaches a fundamental limit, causing the log-log relationship to bend. The quadratic polynomial is the simplest smooth extension that captures this saturation behavior.
+
+### Physical Interpretation
+
+In the context of parallel scaling, FLOPs serve as a proxy for total computational budget. The Brier score measures calibration quality (lower/more negative is better, with 0 being perfect). As FLOPs increase, the Brier score follows a curved trajectory in log space, reflecting the diminishing returns of additional compute -- a hallmark of scaling laws across machine learning.
+
+## Methodology
+
+### 1. Dataset Exploration
+
+The training dataset contains 389 data points across 9 experimental groups (benchmark tasks):
+
+| Group | Points | Brier Score Range |
+|-------|--------|-------------------|
+| abstract_narrative_understanding | 54 | [-0.702, -0.103] |
+| analogical_similarity | 47 | [-0.677, -0.450] |
+| arc | 54 | [-0.312, -0.008] |
+| arithmetic | 44 | [-0.775, -0.070] |
+| conceptual_combinations | 31 | [-0.566, -0.263] |
+| hellaswag | 54 | [-0.232, -0.001] |
+| hindu_knowledge | 19 | [-0.507, -0.312] |
+| mmlu | 32 | [-0.574, -0.386] |
+| parsinlu_qa_mc | 54 | [-0.642, -0.342] |
+
+Each point represents a different pretrained language model (Pythia, OPT, LLaMA, GPT-Neo, BLOOM, etc.), providing diverse coverage of model architectures, sizes, and training regimes.
+
+### 2. Model Selection
+
+I evaluated several candidate functional forms using least-squares fitting and leave-one-out cross-validation:
+
+| Model Form | Parameters | Description |
+|-----------|------------|-------------|
+| Linear in log | 2 | $a + b \cdot \log_{10}(f)$ |
+| Quadratic in log | 3 | $a + b \cdot \log_{10}(f) + c \cdot \log_{10}(f)^2$ |
+| Inverse power law | 3 | $a + b \cdot f^{-c}$ (nonlinear) |
+| Log + $1/\sqrt{f}$ | 3 | $a + b \cdot \log_{10}(f) + c / \sqrt{f}$ |
+| Log + $1/\sqrt{f}$ + $1/f$ | 4 | Combined log and inverse terms |
+
+**Selection criteria:**
+- The functional form must be identical across all groups (problem constraint)
+- Leave-one-out CV MSE indicates generalization quality
+- Interpretability as a scaling law
+- Model complexity (avoiding overfitting, especially for small groups)
+
+The **quadratic in log** model was selected because:
+1. It is the natural second-order expansion of any smooth scaling law in log space
+2. It achieves competitive or best cross-validation performance on groups with clear signal (arc, hellaswag, arithmetic, parsinlu_qa_mc)
+3. It correctly captures the curvature (saturation) that distinguishes real scaling laws from simple power-law fits
+4. With only 3 parameters, it avoids overfitting the smaller groups
+
+### 3. Coefficient Fitting
+
+Coefficients were fitted independently per group using ordinary least squares regression. For a group $g$ with $n$ data points, we solve:
+
+$$\min_{a,b,c} \sum_{i=1}^{n} \left( \text{brier}_i - (a + b \cdot x_i + c \cdot x_i^2) \right)^2$$
+
+where $x_i = \log_{10}(\text{flops}_i)$. The optimization has a closed-form solution via the normal equations.
+
+## Fitted Coefficients
+
+| Group | $a$ | $b$ | $c$ |
+|-------|-----|-----|-----|
+| abstract_narrative_understanding | -0.543140714074 | 0.184726990056 | -0.001002095719 |
+| analogical_similarity | -0.540575053774 | 0.027911287483 | -0.019175879673 |
+| arc | -0.107112232715 | 0.117619490399 | -0.036868206394 |
+| arithmetic | -0.247532677712 | 0.235370097975 | -0.129978149629 |
+| conceptual_combinations | -0.409345543131 | 0.096925955229 | -0.071483567065 |
+| hellaswag | -0.067196861546 | 0.098051454349 | -0.033670645756 |
+| hindu_knowledge | -0.410317419378 | -0.031143510555 | -0.034402388960 |
+| mmlu | -0.480364650220 | -0.062970434888 | 0.011476264281 |
+| parsinlu_qa_mc | -0.434950718068 | 0.098905837326 | -0.056567395374 |
+
+### Fit Quality
+
+| Group | MSE | MAE | $R^2$ |
+|-------|-----|-----|-------|
+| abstract_narrative_understanding | 0.00743 | 0.0619 | 0.758 |
+| analogical_similarity | 0.00241 | 0.0388 | 0.059 |
+| arc | 0.00078 | 0.0165 | 0.804 |
+| arithmetic | 0.01112 | 0.0801 | 0.475 |
+| conceptual_combinations | 0.00356 | 0.0479 | 0.385 |
+| hellaswag | 0.00036 | 0.0133 | 0.851 |
+| hindu_knowledge | 0.00165 | 0.0332 | 0.188 |
+| mmlu | 0.00114 | 0.0249 | 0.557 |
+| parsinlu_qa_mc | 0.00216 | 0.0368 | 0.465 |
+
+The variation in $R^2$ across groups reflects inherent differences in how well FLOPs predict benchmark performance. For tasks like hellaswag and arc, compute is a strong predictor of calibration quality. For tasks like analogical_similarity and hindu_knowledge, other factors (training data composition, architectural choices) dominate, leading to higher scatter around the scaling trend.
+
+The negative quadratic coefficients ($c < 0$) for most groups indicate downward curvature -- the Brier score improves at a decreasing rate as compute increases, consistent with diminishing returns from scaling.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Reward written to /logs/verifier/reward.txt: -1.0

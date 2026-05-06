@@ -1,0 +1,96 @@
+--- Final Solver (used for performance test) ---
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import scipy.linalg
+from scipy.linalg._matfuncs import recursive_schur_sqrtm
+from typing import Any
+
+
+def _parse_matrix(A_raw):
+    """
+    Parse input matrix, preserving dtype when possible.
+    """
+    if isinstance(A_raw, np.ndarray):
+        if np.issubdtype(A_raw.dtype, np.inexact):
+            return A_raw
+        if np.issubdtype(A_raw.dtype, np.integer):
+            return A_raw.astype(np.float64)
+    
+    A = np.asarray(A_raw)
+    
+    if np.issubdtype(A.dtype, np.inexact):
+        return A
+    if np.issubdtype(A.dtype, np.integer):
+        return A.astype(np.float64)
+    
+    # String/unicode/object dtype
+    if A.dtype.kind in ('U', 'S', 'O'):
+        flat = A.ravel()
+        parsed = np.empty(flat.size, dtype=np.complex128)
+        for idx, val in enumerate(flat):
+            s = str(val).strip()
+            if s.startswith('(') and s.endswith(')'):
+                s = s[1:-1]
+            parsed[idx] = complex(s)
+        result = parsed.reshape(A.shape)
+        if np.all(result.imag == 0):
+            return result.real.astype(np.float64)
+        return result
+    
+    return A.astype(np.complex128)
+
+
+class Solver:
+    def solve(self, problem, **kwargs) -> Any:
+        """
+        Solves the matrix square root problem.
+        Computes the principal matrix square root X such that X @ X = A.
+        """
+        A_raw = problem["matrix"]
+        A = _parse_matrix(A_raw)
+        n = A.shape[0]
+        
+        if n == 0:
+            return {"sqrtm": {"X": []}}
+        
+        if n == 1:
+            return {"sqrtm": {"X": [[complex(np.sqrt(A[0, 0]))]]}}
+        
+        try:
+            result = recursive_schur_sqrtm(A)
+            X = result[0]
+            return {"sqrtm": {"X": X.tolist()}}
+        except Exception:
+            pass
+        
+        try:
+            X = scipy.linalg.sqrtm(A)
+            return {"sqrtm": {"X": X.tolist()}}
+        except Exception:
+            return {"sqrtm": {"X": []}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 26.2347s
+Total Solver Time:   11.8412s
+Raw Speedup:         2.2155 x
+Final Reward (Score): 2.2155
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 547.65s (0:09:07) =========================

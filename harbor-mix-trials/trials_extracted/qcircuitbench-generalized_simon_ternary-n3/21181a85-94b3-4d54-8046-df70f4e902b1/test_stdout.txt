@@ -1,0 +1,162 @@
+QCircuitBench test starting
+pwd: /app
+tests dir: /tests
+total 32
+drwxr-xr-x 2 root root    62 May  5 06:37 .
+drwxr-xr-x 1 root root   176 May  5 06:37 ..
+-rw-r--r-- 1 root root  2322 May  5 06:37 simon_ternary_n3.qasm
+-rwxr-xr-x 1 root root 24899 May  5 06:37 test.sh
+solution dir: /solution
+ls: cannot access '/solution': No such file or directory
+app dir: /app
+total 8
+drwxr-xr-x 1 root root   56 May  5 06:36 .
+drwxr-xr-x 1 root root  176 May  5 06:37 ..
+drwxr-xr-x 2 root root   46 May  5 06:36 __pycache__
+-rw-r--r-- 1 root root 4242 May  5 06:36 solution.py
+Python 3.10.9
+conda 26.3.2
+===== BEGIN solution.py =====
+Printing from: /app/solution.py
+-rw-r--r-- 1 root root 4242 May  5 06:36 /app/solution.py
+qasm_string = '''OPENQASM 3.0;
+include "stdgates.inc";
+include "oracle.inc";
+qubit[10] q;
+bit[10] c;
+h q[0];
+h q[1];
+h q[2];
+h q[3];
+h q[4];
+Oracle q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8], q[9];
+measure q[0] -> c[0];
+measure q[1] -> c[1];
+measure q[2] -> c[2];
+measure q[3] -> c[3];
+measure q[4] -> c[4];
+measure q[5] -> c[5];
+measure q[6] -> c[6];
+measure q[7] -> c[7];
+measure q[8] -> c[8];
+measure q[9] -> c[9];
+'''
+
+code_string = '''from qiskit import transpile
+
+def run_and_analyze(circuit, aer_sim):
+    def clean_key(key):
+        return key.replace(" ", "")
+
+    def bits_to_int(bits, little_endian):
+        if little_endian:
+            total = 0
+            for index, bit in enumerate(bits):
+                if bit == "1":
+                    total += 1 << index
+            return total
+        return int(bits, 2)
+
+    def int_to_vec(value, little_trits):
+        digits = []
+        current = value
+        for _ in range(3):
+            digits.append(current % 3)
+            current //= 3
+        if little_trits:
+            return digits
+        return [digits[2], digits[1], digits[0]]
+
+    def vec_to_int(vector, little_trits):
+        if little_trits:
+            return vector[0] + 3 * vector[1] + 9 * vector[2]
+        return 9 * vector[0] + 3 * vector[1] + vector[2]
+
+    def add_vec(value, vector, scale, little_trits):
+        base = int_to_vec(value, little_trits)
+        added = [(base[index] + scale * vector[index]) % 3 for index in range(3)]
+        return vec_to_int(added, little_trits)
+
+    def normalize(vector):
+        if vector == [0, 0, 0]:
+            return vector
+        first = next(item for item in vector if item != 0)
+        if first == 2:
+            return [(2 * item) % 3 for item in vector]
+        return vector
+
+    compiled = transpile(circuit, aer_sim)
+    result = aer_sim.run(compiled, shots=20000, seed_simulator=314159).result()
+    counts = result.get_counts()
+
+    observations = []
+    for key, count in counts.items():
+        key = clean_key(key)
+        if len(key) < 10:
+            key = key.zfill(10)
+        classical_low_to_high = key[::-1]
+        input_bits = classical_low_to_high[:5]
+        output_bits = classical_low_to_high[5:10]
+        observations.append((input_bits, output_bits, count))
+
+    best_score = -1
+    best_vector = [1, 0, 0]
+
+    for little_bits in (True, False):
+        input_to_output_counts = {}
+        for input_bits, output_bits, count in observations:
+            value = bits_to_int(input_bits, little_bits)
+            if value < 27:
+                input_to_output_counts.setdefault(value, {})[output_bits] = input_to_output_counts.setdefault(value, {}).get(output_bits, 0) + count
+
+        input_to_output = {}
+        for value, output_counter in input_to_output_counts.items():
+            input_to_output[value] = max(output_counter, key=output_counter.get)
+
+        if len(input_to_output) < 20:
+            continue
+
+        for little_trits in (False, True):
+            for candidate_value in range(1, 27):
+                candidate = normalize(int_to_vec(candidate_value, little_trits))
+                if candidate == [0, 0, 0]:
+                    continue
+
+                score = 0
+                seen_orbits = set()
+                for value in range(27):
+                    orbit = tuple(sorted(add_vec(value, candidate, scale, little_trits) for scale in range(3)))
+                    if orbit in seen_orbits:
+                        continue
+                    seen_orbits.add(orbit)
+                    labels = [input_to_output.get(item) for item in orbit]
+                    if labels[0] is not None and labels[0] == labels[1] == labels[2]:
+                        score += 6
+                    else:
+                        for left_index in range(3):
+                            for right_index in range(left_index + 1, 3):
+                                if labels[left_index] is not None and labels[left_index] == labels[right_index]:
+                                    score += 1
+
+                if score > best_score:
+                    best_score = score
+                    best_vector = candidate
+
+    prediction = "".join(str(item) for item in best_vector)
+    return prediction
+'''
+
+===== END solution.py =====
+Copied solution.py to /logs/verifier/solution.py
+-rw-r--r-- 1 root root 4242 May  5 06:37 /logs/verifier/solution.py
+    The OpenQASM 3.0 code is valid and has been successfully loaded as a QuantumCircuit.
+Post-processing code loaded successfully.
+    Running Test Case 1
+        Success: 0/10, Fail: 10/10
+    Running Test Case 2
+        Success: 0/10, Fail: 10/10
+Total Success: 0; Total Fail: 20
+qasm_syntax=1.0
+semantic_score=0.0
+gate_count=0.5333333333333333
+code_syntax=1.0

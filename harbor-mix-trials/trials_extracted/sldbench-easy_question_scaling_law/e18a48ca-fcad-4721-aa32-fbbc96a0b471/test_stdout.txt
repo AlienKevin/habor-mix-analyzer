@@ -1,0 +1,128 @@
+---- LAW BEGIN ----
+import numpy as np
+
+# Mathematical Scaling Law:
+#   brier_score = -A / (1 + exp(k * (log_flops - x0))) - C
+# where log_flops = log10(flops). This is a saturating sigmoidal
+# scaling law in log-compute space. As compute grows, the (negative) Brier
+# score plateaus, reflecting diminishing returns of additional FLOPs.
+# The same functional form is used for every benchmark group; only the
+# four constants (A, k, x0, C) differ across groups.
+
+_PARAMS = {
+    'mmlu': (-0.08933, 1013.71050, 0.25133, 0.53158),
+    'parsinlu_qa_mc': (0.17719, 6.01501, -0.58468, 0.42396),
+    'arithmetic': (951.23198, 6.35397, -2.06029, 0.18674),
+    'hindu_knowledge': (0.05239, -270.67084, 0.15572, 0.39606),
+    'analogical_similarity': (-0.14795, -116.84398, -0.87773, 0.68734),
+    'conceptual_combinations': (0.16802, 10.85735, -0.51350, 0.39115),
+    'hellaswag': (0.27633, 2.78961, -0.57452, 0.00305),
+    'arc': (0.63812, 1.78751, -1.13400, 0.01532),
+    'abstract_narrative_understanding': (-1.14869, -0.67679, 0.68985, 0.99249),
+}
+
+_DEFAULT = (0.5, 2.0, 0.0, 0.1)
+
+
+def _predict(log_flops, params):
+    A, k, x0, C = params
+    z = k * (log_flops - x0)
+    z = np.clip(z, -500, 500)
+    return -A / (1.0 + np.exp(z)) - C
+
+
+def law(input_data, group):
+    """Predict brier_score from (log_)flops using a sigmoidal scaling law.
+
+    Each input dict should contain either 'log_flops' or 'flops'.
+    Returns a list of dicts with key 'brier_score'.
+    """
+    params = _PARAMS.get(group, _DEFAULT)
+    out = []
+    for x in input_data:
+        if 'log_flops' in x and x['log_flops'] is not None:
+            lf = float(x['log_flops'])
+        elif 'flops' in x and x['flops'] is not None and x['flops'] > 0:
+            lf = float(np.log10(x['flops']))
+        else:
+            lf = 0.0
+        pred = float(_predict(np.array([lf]), params)[0])
+        out.append({'brier_score': pred})
+    return out
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Discovered Scaling Law
+
+## Dataset
+
+The dataset (`/app/data`) contains 389 evaluation rows with fields
+`group` (benchmark name), `flops` (training compute, in some normalised unit),
+`log_flops` (= log10(flops)), `brier_score` (negated Brier score on the
+benchmark) and `model_name`.
+
+The goal is to predict `brier_score` from `flops` (or equivalently
+`log_flops`) for each benchmark `group`.
+
+## Functional Form
+
+For every benchmark group the relationship between `brier_score` and
+`log_flops` is well described by a four-parameter **sigmoidal saturating
+scaling law in log-compute space**:
+
+$$
+\widehat{\text{brier\_score}} \; = \; -\,\frac{A}{1 + \exp\!\bigl(k\,(\ell - x_0)\bigr)} \; - \; C ,
+\qquad \ell = \log_{10}(\text{flops}) .
+$$
+
+Intuition
+* As FLOPs (and thus model capacity) increases, the sigmoid saturates,
+  reproducing the well-known *plateau* of Brier score vs. compute.
+* `x0` locates the inflection point (the compute scale at which the model
+  transitions from "chance" to "better than chance").
+* `k` is the slope of the transition; positive `k` means the score
+  improves (becomes less negative) with more compute, negative `k`
+  describes benchmarks for which the trend is reversed or essentially
+  flat.
+* `A` is the dynamic range of the score and `C` is the lower asymptote.
+
+The same functional form is used for **all** groups; only the four
+constants `(A, k, x0, C)` are re-fitted per group.
+
+## Methodology
+
+1. Loaded the HuggingFace dataset and grouped rows by `group`.
+2. Examined scatter plots of `brier_score` against `log_flops` per group:
+   most groups show a clear sigmoidal saturating shape.
+3. Fitted the four-parameter sigmoid above with `scipy.optimize.curve_fit`,
+   doing a small grid-search over initial parameters to escape local
+   minima.
+4. Reported the best (lowest RMSE) parameters per group.
+
+## Fitted Parameters and In-sample RMSE
+
+| group | A | k | x0 | C | RMSE |
+|---|---|---|---|---|---|
+| mmlu | -0.08933 | 1013.71050 | 0.25133 | 0.53158 | 0.0310 |
+| parsinlu_qa_mc | 0.17719 | 6.01501 | -0.58468 | 0.42396 | 0.0541 |
+| arithmetic | 951.23198 | 6.35397 | -2.06029 | 0.18674 | 0.0897 |
+| hindu_knowledge | 0.05239 | -270.67084 | 0.15572 | 0.39606 | 0.0372 |
+| analogical_similarity | -0.14795 | -116.84398 | -0.87773 | 0.68734 | 0.0463 |
+| conceptual_combinations | 0.16802 | 10.85735 | -0.51350 | 0.39115 | 0.0587 |
+| hellaswag | 0.27633 | 2.78961 | -0.57452 | 0.00305 | 0.0161 |
+| arc | 0.63812 | 1.78751 | -1.13400 | 0.01532 | 0.0257 |
+| abstract_narrative_understanding | -1.14869 | -0.67679 | 0.68985 | 0.99249 | 0.0861 |
+
+(Some fits collapse to near step-functions when the data are very flat
+in log-compute, which is why a few `k` values are very large in
+magnitude; in those cases the law simply predicts the asymptotic value.
+This is still consistent with the general sigmoidal form.)
+
+## Usage
+
+The accompanying `law.py` exposes `law(input_data, group)`. Each input
+dict may carry `log_flops` (preferred) or `flops`; the function returns a
+list of dicts with the predicted `brier_score`.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.24450758738440947

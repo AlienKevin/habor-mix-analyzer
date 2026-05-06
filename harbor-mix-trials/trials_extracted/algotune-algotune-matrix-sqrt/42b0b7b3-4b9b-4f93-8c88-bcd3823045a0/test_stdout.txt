@@ -1,0 +1,104 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import scipy.linalg
+import threadpoolctl
+from typing import Any
+import warnings
+
+class Solver:
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, dict[str, list[list[complex]]]]:
+        A = problem.get("matrix")
+        if A is None:
+             return {"sqrtm": {"X": []}}
+             
+        try:
+            A_np = np.asarray(A, dtype=complex)
+        except Exception:
+            return {"sqrtm": {"X": []}}
+            
+        n = A_np.shape[0]
+        if n == 0:
+            return {"sqrtm": {"X": []}}
+            
+        # Fast path for 1x1 matrix
+        if n == 1:
+            try:
+                X = np.sqrt(A_np)
+                return {"sqrtm": {"X": X.tolist()}}
+            except Exception:
+                pass
+            
+        # Fast path for diagonal matrices
+        try:
+            diag_A = np.diag(A_np)
+            if np.array_equal(A_np, np.diag(diag_A)):
+                X = np.diag(np.sqrt(diag_A))
+                return {"sqrtm": {"X": X.tolist()}}
+        except Exception:
+            pass
+            
+        # Fast path for Hermitian / Real Symmetric matrices
+        # (These are always diagonalizable with real eigenvalues, 
+        # so eigh is much faster and numerically stable)
+        try:
+            if np.array_equal(A_np, A_np.conj().T):
+                w, v = np.linalg.eigh(A_np)
+                # np.sqrt on complex cast ensures we get principal root
+                # even if there are negative eigenvalues
+                X = (v * np.sqrt(w.astype(complex))) @ v.conj().T
+                return {"sqrtm": {"X": X.tolist()}}
+        except Exception:
+            pass
+            
+        # Optimization for purely real matrices:
+        # scipy.linalg.sqrtm uses a real Schur decomposition if the input is real,
+        # which is about 2x faster than the complex Schur decomposition.
+        if np.all(A_np.imag == 0):
+            A_np = A_np.real
+            
+        # Determine optimal thread limit for OpenBLAS
+        # OpenBLAS thread thrashing severely impacts performance for small matrices
+        lim = 1 if n < 450 else 4
+        
+        with threadpoolctl.threadpool_limits(limits=lim):
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    X, _ = scipy.linalg.sqrtm(A_np, disp=False)
+                
+                # The validator casts it to complex anyway
+                if isinstance(X, np.ndarray):
+                    return {"sqrtm": {"X": X.tolist()}}
+                return {"sqrtm": {"X": []}}
+            except Exception:
+                return {"sqrtm": {"X": []}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 28.2269s
+Total Solver Time:   4.3927s
+Raw Speedup:         6.4258 x
+Final Reward (Score): 6.4258
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================= 3 passed, 1100 warnings in 516.48s (0:08:36) =================

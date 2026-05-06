@@ -1,0 +1,326 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy.linalg import expm
+from numba import jit
+
+@jit(nopython=True, cache=True)
+def _simulate_jit(Phi, G1, G2, Cf, Df, u, N):
+    n = Phi.shape[0]
+    yout = np.zeros(N, dtype=np.float64)
+    x = np.zeros(n, dtype=np.float64)
+    yout[0] = np.dot(Cf, x) + Df * u[0]
+    for k in range(N - 1):
+        x_new = np.dot(Phi, x) + G1 * u[k] + G2 * u[k + 1]
+        x = x_new
+        yout[k + 1] = np.dot(Cf, x) + Df * u[k + 1]
+    return yout
+
+
+class Solver:
+    def __init__(self):
+        # Pre-compile the JIT function
+        dummy_n = 1
+        Phi = np.eye(dummy_n, dtype=np.float64)
+        G1 = np.zeros(dummy_n, dtype=np.float64)
+        G2 = np.zeros(dummy_n, dtype=np.float64)
+        Cf = np.zeros(dummy_n, dtype=np.float64)
+        Df = 0.0
+        u = np.zeros(2, dtype=np.float64)
+        _simulate_jit(Phi, G1, G2, Cf, Df, u, 2)
+    
+    def solve(self, problem: dict) -> dict:
+        num_in = problem["num"]
+        den_in = problem["den"]
+        u_in = problem["u"]
+        t_in = problem["t"]
+        
+        t = np.asarray(t_in, dtype=np.float64)
+        u = np.asarray(u_in, dtype=np.float64)
+        num = np.asarray(num_in, dtype=np.float64)
+        den = np.asarray(den_in, dtype=np.float64)
+        
+        N = len(t)
+        if N == 0:
+            return {"yout": []}
+        
+        # Check if time vector is uniform
+        if N > 2:
+            dt_arr = np.diff(t)
+            dt = dt_arr[0]
+            is_uniform = np.allclose(dt_arr, dt, rtol=1e-12, atol=1e-15)
+        elif N == 2:
+            dt = t[1] - t[0]
+            is_uniform = True
+        else:
+            dt = 1.0
+            is_uniform = True
+        
+        if is_uniform and N > 1:
+            yout = self._solve_uniform(num, den, u, dt)
+        elif N == 1:
+            # Single point: compute output directly from state-space with zero initial condition
+            A, B, C, D = Solver._tf2ss_controllable(num, den)
+            x = np.zeros(A.shape[0])
+            Df = D[0]
+            Cf = C
+            yout_val = np.dot(Cf, x) + Df * u[0]
+            return {"yout": [float(yout_val)]}
+        else:
+            # Non-uniform time: per-step FOH discretization
+            yout = self._solve_nonuniform(num, den, u, t)
+        
+        if isinstance(yout, np.ndarray):
+            yout_list = yout.tolist()
+        elif np.isscalar(yout):
+            yout_list = [float(yout)]
+        else:
+            yout_list = list(yout)
+        return {"yout": yout_list}
+    
+    @staticmethod
+    def _tf2ss_controllable(num, den):
+        if den[0] != 1.0:
+            num = num / den[0]
+            den = den / den[0]
+        
+        n = len(den) - 1
+        m = len(num) - 1
+        
+        A = np.zeros((n, n), dtype=np.float64)
+        if n > 0:
+            A[0, :] = -den[1:]
+            for i in range(1, n):
+                A[i, i - 1] = 1.0
+        
+        B = np.zeros(n, dtype=np.float64)
+        if n > 0:
+            B[0] = 1.0
+        
+        num_padded = np.zeros(n + 1, dtype=np.float64)
+        if m >= 0:
+            start_idx = n - m
+            num_padded[start_idx:] = num
+        
+        b0 = num_padded[0]
+        a_coeff = den[1:]
+        b_coeff = num_padded[1:]
+        
+        if n > 0:
+            C = b_coeff - b0 * a_coeff
+            D = np.array([b0], dtype=np.float64)
+        else:
+            C = np.zeros(0, dtype=np.float64)
+            D = np.array([b0], dtype=np.float64)
+        
+        return A, B, C, D
+    
+    @staticmethod
+    def _discretize_foh(A, B, C, D, dt):
+        n = A.shape[0]
+        if n == 0:
+            return np.zeros((0, 0)), np.zeros(0), np.zeros(0)
+        M = np.zeros((n + 2, n + 2), dtype=np.float64)
+        M[:n, :n] = A
+        M[:n, n] = B
+        M[n, n + 1] = 1.0
+        
+        eM = expm(M * dt)
+        Phi = eM[:n, :n]
+        Gamma0 = eM[:n, n]
+        Gamma1 = eM[:n, n + 1]
+        
+        G1 = Gamma0 - Gamma1 / dt
+        G2 = Gamma1 / dt
+        
+        return Phi, G1, G2
+    
+    @staticmethod
+    def _solve_uniform(num, den, u, dt):
+        A, B, C, D = Solver._tf2ss_controllable(num, den)
+        n = A.shape[0]
+        
+        if n == 0:
+            return D[0] * u
+        
+        Phi, G1, G2 = Solver._discretize_foh(A, B, C, D, dt)
+        
+        Cf = np.ascontiguousarray(C)
+        Df = D[0]
+        Phi = np.ascontiguousarray(Phi)
+        G1 = np.ascontiguousarray(G1)
+        G2 = np.ascontiguousarray(G2)
+        
+        yout = _simulate_jit(Phi, G1, G2, Cf, Df, u, len(u))
+        return yout
+    
+    @staticmethod
+    def _solve_nonuniform(num, den, u, t):
+        """
+        Handle non-uniform time steps using per-step FOH discretization.
+        """
+        N = len(t)
+        if N <= 1:
+            return np.array([0.0])
+        
+        A, B, C, D = Solver._tf2ss_controllable(num, den)
+        n = A.shape[0]
+        Bf = B
+        Cf = C
+        Df = D[0]
+        
+        yout = np.zeros(N, dtype=np.float64)
+        x = np.zeros(n, dtype=np.float64)
+        yout[0] = np.dot(Cf, x) + Df * u[0]
+        
+        for k in range(N - 1):
+            dt_k = t[k + 1] - t[k]
+            if dt_k <= 0.0:
+                yout[k + 1] = yout[k]
+                continue
+            
+            M = np.zeros((n + 2, n + 2), dtype=np.float64)
+            M[:n, :n] = A
+            M[:n, n] = Bf
+            M[n, n + 1] = 1.0
+            
+            eM = expm(M * dt_k)
+            Phi = eM[:n, :n]
+            Gamma0 = eM[:n, n]
+            Gamma1 = eM[:n, n + 1]
+            
+            G1 = Gamma0 - Gamma1 / dt_k
+            G2 = Gamma1 / dt_k
+            
+            x = np.dot(Phi, x) + G1 * u[k] + G2 * u[k + 1]
+            yout[k + 1] = np.dot(Cf, x) + Df * u[k + 1]
+        
+        return yout
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:28: in __init__
+    _simulate_jit(Phi, G1, G2, Cf, Df, u, 2)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7b2f5efcc0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:28: in __init__
+    _simulate_jit(Phi, G1, G2, Cf, Df, u, 2)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7b2f5efcc0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 1.06s ==========================

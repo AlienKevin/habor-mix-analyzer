@@ -1,0 +1,202 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy import signal, linalg
+import numba
+from typing import Any
+
+@numba.njit(cache=True)
+def simulate_loop(xout, U, Ad, Bd0, Bd1, n_steps):
+    for i in range(1, n_steps):
+        xout[i] = xout[i-1] @ Ad + U[i-1] @ Bd0 + U[i] @ Bd1
+    return xout
+
+class Solver:
+    def __init__(self):
+        # Pre-compile the numba function with a dummy call
+        dummy_xout = np.zeros((2, 2), dtype=np.float64)
+        dummy_U = np.zeros((2, 1), dtype=np.float64)
+        dummy_Ad = np.eye(2, dtype=np.float64)
+        dummy_Bd0 = np.zeros((2, 2), dtype=np.float64)
+        dummy_Bd1 = np.zeros((2, 2), dtype=np.float64)
+        # Shapes must match what simulate_loop expects
+        dummy_xout = np.zeros((2, 2), dtype=np.float64)
+        dummy_U = np.zeros((2, 1), dtype=np.float64)
+        dummy_Ad = np.zeros((2, 2), dtype=np.float64)
+        dummy_Bd0 = np.zeros((1, 2), dtype=np.float64)
+        dummy_Bd1 = np.zeros((1, 2), dtype=np.float64)
+        simulate_loop(dummy_xout, dummy_U, dummy_Ad, dummy_Bd0, dummy_Bd1, 2)
+
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, list[float]]:
+        num = problem["num"]
+        den = problem["den"]
+        u = np.array(problem["u"], dtype=np.float64)
+        t = np.array(problem["t"], dtype=np.float64)
+
+        n_steps = len(t)
+        if n_steps == 0:
+            return {"yout": []}
+        elif n_steps == 1:
+            # Edge case, though usually t has >1 elements
+            A, B, C, D = signal.tf2ss(num, den)
+            yout = u[0] * D[0, 0]
+            return {"yout": [float(yout)]}
+
+        dt = t[1] - t[0]
+
+        A, B, C, D = signal.tf2ss(num, den)
+        n_states = A.shape[0]
+        n_inputs = B.shape[1]
+
+        # Exact discretization with First-Order Hold (linear interpolation)
+        M = np.vstack([
+            np.hstack([A * dt, B * dt, np.zeros((n_states, n_inputs))]),
+            np.hstack([np.zeros((n_inputs, n_states + n_inputs)), np.identity(n_inputs)]),
+            np.zeros((n_inputs, n_states + 2 * n_inputs))
+        ])
+        expMT = linalg.expm(M.T)
+        
+        Ad = np.ascontiguousarray(expMT[:n_states, :n_states])
+        Bd1 = np.ascontiguousarray(expMT[n_states+n_inputs:, :n_states])
+        Bd0 = np.ascontiguousarray(expMT[n_states:n_states + n_inputs, :n_states] - Bd1)
+
+        xout = np.zeros((n_steps, n_states), dtype=np.float64)
+        U = np.ascontiguousarray(u.reshape(-1, 1))
+
+        xout = simulate_loop(xout, U, Ad, Bd0, Bd1, n_steps)
+        
+        yout = (xout @ C.T).squeeze() + (U @ D.T).squeeze()
+        
+        # Ensure yout is a 1D array/list
+        if yout.ndim == 0:
+            yout = np.array([yout])
+            
+        return {"yout": yout.tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:26: in __init__
+    simulate_loop(dummy_xout, dummy_U, dummy_Ad, dummy_Bd0, dummy_Bd1, 2)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7412bac440e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:26: in __init__
+    simulate_loop(dummy_xout, dummy_U, dummy_Ad, dummy_Bd0, dummy_Bd1, 2)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7412bac440e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 1.06s ==========================

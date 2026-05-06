@@ -1,0 +1,114 @@
+---- LAW BEGIN ----
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    import math
+
+    coefficients = {
+        "abstract_narrative_understanding": (-0.54314071407446529, 0.18472699005645865, -0.001002095718967947),
+        "analogical_similarity": (-0.54057505377355752, 0.027911287483472377, -0.019175879672698386),
+        "arc": (-0.1071122327154293, 0.11761949039897279, -0.036868206393668695),
+        "arithmetic": (-0.24753267771220785, 0.23537009797522834, -0.12997814962868381),
+        "conceptual_combinations": (-0.40934554313141819, 0.096925955228610777, -0.071483567064715176),
+        "hellaswag": (-0.067196861546460332, 0.098051454349454253, -0.033670645755682321),
+        "hindu_knowledge": (-0.41031741937809141, -0.03114351055488461, -0.034402388960080924),
+        "mmlu": (-0.48036465021983515, -0.062970434887896276, 0.011476264280523035),
+        "parsinlu_qa_mc": (-0.43495071806820118, 0.098905837326400695, -0.056567395374071648),
+    }
+    default_coefficients = (-0.37843969383704074, 0.0773755683685727, 0.002644673247271381)
+    a, b, c = coefficients.get(group, default_coefficients)
+
+    predictions = []
+    for row in input_data:
+        if "log_flops" in row:
+            log_scale = float(row["log_flops"])
+        elif "flops" in row and float(row["flops"]) > 0.0:
+            log_scale = math.log10(float(row["flops"]))
+        elif "num_params" in row and "parallel_size" in row:
+            params = float(row["num_params"])
+            if params > 1e6:
+                params /= 1e9
+            scale = max(params * float(row["parallel_size"]), 1e-300)
+            log_scale = math.log10(scale)
+        elif "num_params" in row:
+            params = float(row["num_params"])
+            if params > 1e6:
+                params /= 1e9
+            log_scale = math.log10(max(params, 1e-300))
+        else:
+            log_scale = 0.0
+
+        prediction = a + b * log_scale + c * log_scale * log_scale
+        prediction = max(-1.0, min(0.0, prediction))
+        output_name = "loss" if ("num_params" in row and "flops" not in row and "log_flops" not in row) else "brier_score"
+        predictions.append({output_name: prediction})
+
+    return predictions
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Discovered Scaling Law
+
+The dataset saved in `/app/data` contains the numeric inputs `flops` and `log_flops`, the grouping variable `group`, and the target `brier_score`. The fitted scale variable is
+
+\[
+x = \log_{10}(\mathrm{flops}).
+\]
+
+For every group I used the same quadratic law in log-compute:
+
+\[
+\widehat{\mathrm{brier\_score}}_g(x) = a_g + b_g x + c_g x^2.
+\]
+
+Because the stored score is the negative Brier score, physically plausible predictions should not be positive. The implementation clips the final prediction to `[-1, 0]`.
+
+# Methodology
+
+1. Loaded the dataset with `datasets.load_from_disk('/app/data')` and verified that `log_flops = log10(flops)`.
+2. Treated `group` as selecting task-specific coefficients while keeping one shared functional form for all groups.
+3. Compared simple candidate laws: group means, linear/quadratic/cubic polynomials in `log_flops`, and power-law variants in `flops`.
+4. Selected the quadratic log-compute law because it gave a strong fit while remaining stable under held-out-row, held-out-model, and high-compute validation splits. Higher-degree curves slightly improved some random splits but extrapolated poorly; pure power laws were less stable for groups whose scores were nearly flat or noisy.
+5. Refit the chosen law on all 389 visible rows. The resulting in-sample RMSE is about `0.0591` and MAE is about `0.0391` on `brier_score`.
+
+# Fitted Coefficients
+
+The coefficients are listed as `(a_g, b_g, c_g)` in
+
+\[
+\widehat{y}_g = a_g + b_g \log_{10}(\mathrm{flops}) + c_g \log_{10}(\mathrm{flops})^2.
+\]
+
+| group | a | b | c |
+|---|---:|---:|---:|
+| abstract_narrative_understanding | -0.5431407141 | 0.1847269901 | -0.0010020957 |
+| analogical_similarity | -0.5405750538 | 0.0279112875 | -0.0191758797 |
+| arc | -0.1071122327 | 0.1176194904 | -0.0368682064 |
+| arithmetic | -0.2475326777 | 0.2353700980 | -0.1299781496 |
+| conceptual_combinations | -0.4093455431 | 0.0969259552 | -0.0714835671 |
+| hellaswag | -0.0671968615 | 0.0980514543 | -0.0336706458 |
+| hindu_knowledge | -0.4103174194 | -0.0311435106 | -0.0344023890 |
+| mmlu | -0.4803646502 | -0.0629704349 | 0.0114762643 |
+| parsinlu_qa_mc | -0.4349507181 | 0.0989058373 | -0.0565673954 |
+
+For an unknown group, the implementation falls back to a global quadratic fit across all groups:
+
+\[
+(a, b, c) = (-0.3784396938,\ 0.0773755684,\ 0.0026446732).
+\]
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Reward written to /logs/verifier/reward.txt: -1.0

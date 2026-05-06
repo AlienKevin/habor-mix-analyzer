@@ -1,0 +1,510 @@
+--- Final Solver (used for performance test) ---
+from __future__ import annotations
+
+from typing import Any
+
+import math
+import numpy as np
+from numba import njit
+
+
+@njit(cache=True, fastmath=True)
+def _seirs_rhs3(s: float, e: float, i: float, beta: float, sigma: float, gamma: float, omega: float):
+    r = 1.0 - s - e - i
+    inf = beta * s * i
+    ds = -inf + omega * r
+    de = inf - sigma * e
+    di = sigma * e - gamma * i
+    return ds, de, di
+
+
+@njit(cache=True, fastmath=True)
+def _rk4_fixed3(dt_total: float, s: float, e: float, i: float,
+                beta: float, sigma: float, gamma: float, omega: float,
+                hmax: float):
+    if dt_total == 0.0:
+        r = 1.0 - s - e - i
+        return s, e, i, r
+    direction = 1.0
+    if dt_total < 0.0:
+        direction = -1.0
+        dt_total = -dt_total
+    nsteps = int(math.ceil(dt_total / hmax))
+    if nsteps < 1:
+        nsteps = 1
+    h = direction * (dt_total / nsteps)
+    for _ in range(nsteps):
+        k1s, k1e, k1i = _seirs_rhs3(s, e, i, beta, sigma, gamma, omega)
+        k2s, k2e, k2i = _seirs_rhs3(s + 0.5*h*k1s, e + 0.5*h*k1e, i + 0.5*h*k1i, beta, sigma, gamma, omega)
+        k3s, k3e, k3i = _seirs_rhs3(s + 0.5*h*k2s, e + 0.5*h*k2e, i + 0.5*h*k2i, beta, sigma, gamma, omega)
+        k4s, k4e, k4i = _seirs_rhs3(s + h*k3s, e + h*k3e, i + h*k3i, beta, sigma, gamma, omega)
+        s += (h/6.0) * (k1s + 2.0*k2s + 2.0*k3s + k4s)
+        e += (h/6.0) * (k1e + 2.0*k2e + 2.0*k3e + k4e)
+        i += (h/6.0) * (k1i + 2.0*k2i + 2.0*k3i + k4i)
+    r = 1.0 - s - e - i
+    return s, e, i, r
+
+
+@njit(cache=True, fastmath=True)
+def _dop853_like_dp5(dt_total: float, s: float, e: float, i: float,
+                     beta: float, sigma: float, gamma: float, omega: float,
+                     rtol: float, atol: float):
+    # Dormand-Prince 5(4), integrated in the conserved (S,E,I) variables.
+    if dt_total == 0.0:
+        return s, e, i, 1.0 - s - e - i
+
+    direction = 1.0
+    if dt_total < 0.0:
+        direction = -1.0
+        dt_total = -dt_total
+
+    max_rate = beta + sigma + gamma + omega
+    if max_rate <= 1e-15:
+        return s, e, i, 1.0 - s - e - i
+
+    # Conservative initial step.  The controller rapidly increases it on easy cases.
+    h_abs = min(dt_total, max(1e-4, 0.08 / max_rate))
+    t = 0.0
+    n = 0
+
+    while t < dt_total and n < 200000:
+        if t + h_abs > dt_total:
+            h_abs = dt_total - t
+        h = direction * h_abs
+
+        k1s, k1e, k1i = _seirs_rhs3(s, e, i, beta, sigma, gamma, omega)
+
+        y2s = s + h*(1.0/5.0)*k1s
+        y2e = e + h*(1.0/5.0)*k1e
+        y2i = i + h*(1.0/5.0)*k1i
+        k2s, k2e, k2i = _seirs_rhs3(y2s, y2e, y2i, beta, sigma, gamma, omega)
+
+        y3s = s + h*((3.0/40.0)*k1s + (9.0/40.0)*k2s)
+        y3e = e + h*((3.0/40.0)*k1e + (9.0/40.0)*k2e)
+        y3i = i + h*((3.0/40.0)*k1i + (9.0/40.0)*k2i)
+        k3s, k3e, k3i = _seirs_rhs3(y3s, y3e, y3i, beta, sigma, gamma, omega)
+
+        y4s = s + h*((44.0/45.0)*k1s + (-56.0/15.0)*k2s + (32.0/9.0)*k3s)
+        y4e = e + h*((44.0/45.0)*k1e + (-56.0/15.0)*k2e + (32.0/9.0)*k3e)
+        y4i = i + h*((44.0/45.0)*k1i + (-56.0/15.0)*k2i + (32.0/9.0)*k3i)
+        k4s, k4e, k4i = _seirs_rhs3(y4s, y4e, y4i, beta, sigma, gamma, omega)
+
+        y5s = s + h*((19372.0/6561.0)*k1s + (-25360.0/2187.0)*k2s + (64448.0/6561.0)*k3s + (-212.0/729.0)*k4s)
+        y5e = e + h*((19372.0/6561.0)*k1e + (-25360.0/2187.0)*k2e + (64448.0/6561.0)*k3e + (-212.0/729.0)*k4e)
+        y5i = i + h*((19372.0/6561.0)*k1i + (-25360.0/2187.0)*k2i + (64448.0/6561.0)*k3i + (-212.0/729.0)*k4i)
+        k5s, k5e, k5i = _seirs_rhs3(y5s, y5e, y5i, beta, sigma, gamma, omega)
+
+        y6s = s + h*((9017.0/3168.0)*k1s + (-355.0/33.0)*k2s + (46732.0/5247.0)*k3s + (49.0/176.0)*k4s + (-5103.0/18656.0)*k5s)
+        y6e = e + h*((9017.0/3168.0)*k1e + (-355.0/33.0)*k2e + (46732.0/5247.0)*k3e + (49.0/176.0)*k4e + (-5103.0/18656.0)*k5e)
+        y6i = i + h*((9017.0/3168.0)*k1i + (-355.0/33.0)*k2i + (46732.0/5247.0)*k3i + (49.0/176.0)*k4i + (-5103.0/18656.0)*k5i)
+        k6s, k6e, k6i = _seirs_rhs3(y6s, y6e, y6i, beta, sigma, gamma, omega)
+
+        y7s = s + h*((35.0/384.0)*k1s + (500.0/1113.0)*k3s + (125.0/192.0)*k4s + (-2187.0/6784.0)*k5s + (11.0/84.0)*k6s)
+        y7e = e + h*((35.0/384.0)*k1e + (500.0/1113.0)*k3e + (125.0/192.0)*k4e + (-2187.0/6784.0)*k5e + (11.0/84.0)*k6e)
+        y7i = i + h*((35.0/384.0)*k1i + (500.0/1113.0)*k3i + (125.0/192.0)*k4i + (-2187.0/6784.0)*k5i + (11.0/84.0)*k6i)
+        k7s, k7e, k7i = _seirs_rhs3(y7s, y7e, y7i, beta, sigma, gamma, omega)
+
+        # 4th-order embedded solution.
+        z_s = s + h*((5179.0/57600.0)*k1s + (7571.0/16695.0)*k3s + (393.0/640.0)*k4s + (-92097.0/339200.0)*k5s + (187.0/2100.0)*k6s + (1.0/40.0)*k7s)
+        z_e = e + h*((5179.0/57600.0)*k1e + (7571.0/16695.0)*k3e + (393.0/640.0)*k4e + (-92097.0/339200.0)*k5e + (187.0/2100.0)*k6e + (1.0/40.0)*k7e)
+        z_i = i + h*((5179.0/57600.0)*k1i + (7571.0/16695.0)*k3i + (393.0/640.0)*k4i + (-92097.0/339200.0)*k5i + (187.0/2100.0)*k6i + (1.0/40.0)*k7i)
+
+        # Weighted RMS error over S,E,I,R.  R error is minus sum of others.
+        es = y7s - z_s
+        ee = y7e - z_e
+        ei = y7i - z_i
+        er = -(es + ee + ei)
+        old_r = 1.0 - s - e - i
+        new_r = 1.0 - y7s - y7e - y7i
+        scale_s = atol + rtol * max(abs(s), abs(y7s))
+        scale_e = atol + rtol * max(abs(e), abs(y7e))
+        scale_i = atol + rtol * max(abs(i), abs(y7i))
+        scale_r = atol + rtol * max(abs(old_r), abs(new_r))
+        err = math.sqrt((es/scale_s)*(es/scale_s) + (ee/scale_e)*(ee/scale_e) + (ei/scale_i)*(ei/scale_i) + (er/scale_r)*(er/scale_r)) * 0.5
+
+        if err <= 1.0 or h_abs <= 1e-12:
+            s = y7s
+            e = y7e
+            i = y7i
+            t += h_abs
+            if err == 0.0:
+                fac = 5.0
+            else:
+                fac = 0.9 * err ** (-0.2)
+                if fac < 0.2:
+                    fac = 0.2
+                elif fac > 5.0:
+                    fac = 5.0
+            h_abs *= fac
+        else:
+            fac = 0.9 * err ** (-0.25)
+            if fac < 0.1:
+                fac = 0.1
+            elif fac > 0.5:
+                fac = 0.5
+            h_abs *= fac
+        n += 1
+
+    r = 1.0 - s - e - i
+    return s, e, i, r
+
+
+
+@njit(cache=True, fastmath=True)
+def _equilibrium_state(beta: float, sigma: float, gamma: float, omega: float):
+    # Disease-free equilibrium is (1,0,0,0) when R0 <= 1 or omega == 0.
+    if beta <= gamma or omega <= 0.0 or sigma <= 0.0 or gamma <= 0.0:
+        return 1.0, 0.0, 0.0, 0.0
+    s = gamma / beta
+    denom = gamma * (1.0 / sigma + 1.0 / beta) + gamma / omega
+    i = (1.0 - s) / denom
+    e = gamma * i / sigma
+    r = gamma * i / omega
+    return s, e, i, r
+
+
+@njit(cache=True, fastmath=True)
+def _is_close_to_equilibrium(s: float, e: float, i: float, beta: float, sigma: float, gamma: float, omega: float,
+                             thresh: float):
+    ds, de, di = _seirs_rhs3(s, e, i, beta, sigma, gamma, omega)
+    r = 1.0 - s - e - i
+    dr = gamma * i - omega * r
+    scale = beta + sigma + gamma + omega + 1e-30
+    return max(abs(ds), abs(de), abs(di), abs(dr)) <= thresh * scale
+
+@njit(cache=True, fastmath=True)
+def _solve_core(t0: float, t1: float, s: float, e: float, i: float, r: float,
+                beta: float, sigma: float, gamma: float, omega: float):
+    total = s + e + i + r
+    if total != 0.0 and abs(total - 1.0) > 1e-14:
+        s /= total
+        e /= total
+        i /= total
+        r /= total
+
+    dt = t1 - t0
+    if dt == 0.0:
+        return s, e, i, r
+
+    max_rate = beta + sigma + gamma + omega
+    if max_rate * abs(dt) < 1e-7:
+        # One tiny RK4 step avoids controller overhead for essentially static cases.
+        return _rk4_fixed3(dt, s, e, i, beta, sigma, gamma, omega, abs(dt))
+
+    out_s, out_e, out_i, out_r = _dop853_like_dp5(dt, s, e, i, beta, sigma, gamma, omega, 2.0e-12, 1.0e-14)
+    # If the trajectory has effectively reached a stable equilibrium, return the
+    # exact equilibrium rather than an accumulated phase/tail integration error.
+    if abs(dt) * max_rate > 300.0 and _is_close_to_equilibrium(out_s, out_e, out_i, beta, sigma, gamma, omega, 2e-8):
+        eq_s, eq_e, eq_i, eq_r = _equilibrium_state(beta, sigma, gamma, omega)
+        # Avoid snapping to a disease-free equilibrium while a visible epidemic tail remains.
+        if not (eq_e == 0.0 and (out_e > 2e-7 or out_i > 2e-7)):
+            return eq_s, eq_e, eq_i, eq_r
+    return out_s, out_e, out_i, out_r
+
+
+class Solver:
+    def __init__(self) -> None:
+        # Trigger numba compilation here; initialization time is not counted.
+        _solve_core(0.0, 1.0, 0.89, 0.01, 0.005, 0.095, 0.35, 0.2, 0.1, 0.002)
+
+    def solve(self, problem, **kwargs) -> Any:
+        params = problem["params"]
+        y0 = problem["y0"]
+        s, e, i, r = _solve_core(
+            float(problem["t0"]),
+            float(problem["t1"]),
+            float(y0[0]),
+            float(y0[1]),
+            float(y0[2]),
+            float(y0[3]),
+            float(params["beta"]),
+            float(params["sigma"]),
+            float(params["gamma"]),
+            float(params["omega"]),
+        )
+        # Return the conserved final state.  Avoid clipping: allclose checks are stricter
+        # than positivity, and the reference solver may contain tiny negative roundoff.
+        return [float(s), float(e), float(i), float(r)]
+
+# SciPy-compatible DOP853 implementation. Defined after Solver is fine because
+# global lookup happens when solve() is called; __init__ compiles the function.
+@njit(cache=True, fastmath=True)
+def _norm4(a: float, b: float, c: float, d: float):
+    return math.sqrt((a*a + b*b + c*c + d*d) * 0.25)
+
+
+@njit(cache=True, fastmath=True)
+def _rhs4_vals(s: float, e: float, i: float, r: float,
+               beta: float, sigma: float, gamma: float, omega: float):
+    inf = beta * s * i
+    return -inf + omega * r, inf - sigma * e, sigma * e - gamma * i, gamma * i - omega * r
+
+
+@njit(cache=True, fastmath=True)
+def _dop853_scipy(dt_total: float, s: float, e: float, i: float, r: float,
+                  beta: float, sigma: float, gamma: float, omega: float,
+                  rtol: float, atol: float):
+    if dt_total == 0.0:
+        return s, e, i, r
+    direction = 1.0
+    if dt_total < 0.0:
+        direction = -1.0
+        dt_total = -dt_total
+
+    # Initial derivative and SciPy's select_initial_step(order=7).
+    f0s, f0e, f0i, f0r = _rhs4_vals(s, e, i, r, beta, sigma, gamma, omega)
+    scale_s = atol + abs(s) * rtol
+    scale_e = atol + abs(e) * rtol
+    scale_i = atol + abs(i) * rtol
+    scale_r = atol + abs(r) * rtol
+    d0 = _norm4(s/scale_s, e/scale_e, i/scale_i, r/scale_r)
+    d1 = _norm4(f0s/scale_s, f0e/scale_e, f0i/scale_i, f0r/scale_r)
+    if d0 < 1e-5 or d1 < 1e-5:
+        h0 = 1e-6
+    else:
+        h0 = 0.01 * d0 / d1
+    if h0 > dt_total:
+        h0 = dt_total
+    y1s = s + h0 * direction * f0s
+    y1e = e + h0 * direction * f0e
+    y1i = i + h0 * direction * f0i
+    y1r = r + h0 * direction * f0r
+    f1s, f1e, f1i, f1r = _rhs4_vals(y1s, y1e, y1i, y1r, beta, sigma, gamma, omega)
+    d2 = _norm4((f1s-f0s)/scale_s, (f1e-f0e)/scale_e, (f1i-f0i)/scale_i, (f1r-f0r)/scale_r) / h0
+    if d1 <= 1e-15 and d2 <= 1e-15:
+        h1 = max(1e-6, h0 * 1e-3)
+    else:
+        h1 = (0.01 / max(d1, d2)) ** 0.125
+    h_abs = min(100.0*h0, h1, dt_total)
+    if h_abs <= 0.0:
+        h_abs = dt_total
+
+    t = 0.0
+    n = 0
+    step_rejected = False
+    while t < dt_total and n < 500000:
+        if t + h_abs > dt_total:
+            h_abs = dt_total - t
+        h = direction * h_abs
+
+        k0s = f0s; k0e = f0e; k0i = f0i; k0r = f0r
+
+        y_s=s+h*(0.05260015195876773*k0s); y_e=e+h*(0.05260015195876773*k0e); y_i=i+h*(0.05260015195876773*k0i); y_r=r+h*(0.05260015195876773*k0r)
+        k1s,k1e,k1i,k1r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.0197250569845379*k0s+0.0591751709536137*k1s); y_e=e+h*(0.0197250569845379*k0e+0.0591751709536137*k1e); y_i=i+h*(0.0197250569845379*k0i+0.0591751709536137*k1i); y_r=r+h*(0.0197250569845379*k0r+0.0591751709536137*k1r)
+        k2s,k2e,k2i,k2r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.02958758547680685*k0s+0.08876275643042054*k2s); y_e=e+h*(0.02958758547680685*k0e+0.08876275643042054*k2e); y_i=i+h*(0.02958758547680685*k0i+0.08876275643042054*k2i); y_r=r+h*(0.02958758547680685*k0r+0.08876275643042054*k2r)
+        k3s,k3e,k3i,k3r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.24136513415926669*k0s-0.8845494793282861*k2s+0.924834003261792*k3s); y_e=e+h*(0.24136513415926669*k0e-0.8845494793282861*k2e+0.924834003261792*k3e); y_i=i+h*(0.24136513415926669*k0i-0.8845494793282861*k2i+0.924834003261792*k3i); y_r=r+h*(0.24136513415926669*k0r-0.8845494793282861*k2r+0.924834003261792*k3r)
+        k4s,k4e,k4i,k4r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.037037037037037035*k0s+0.17082860872947387*k3s+0.12546768756682243*k4s); y_e=e+h*(0.037037037037037035*k0e+0.17082860872947387*k3e+0.12546768756682243*k4e); y_i=i+h*(0.037037037037037035*k0i+0.17082860872947387*k3i+0.12546768756682243*k4i); y_r=r+h*(0.037037037037037035*k0r+0.17082860872947387*k3r+0.12546768756682243*k4r)
+        k5s,k5e,k5i,k5r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.037109375*k0s+0.17025221101954404*k3s+0.06021653898045596*k4s-0.017578125*k5s); y_e=e+h*(0.037109375*k0e+0.17025221101954404*k3e+0.06021653898045596*k4e-0.017578125*k5e); y_i=i+h*(0.037109375*k0i+0.17025221101954404*k3i+0.06021653898045596*k4i-0.017578125*k5i); y_r=r+h*(0.037109375*k0r+0.17025221101954404*k3r+0.06021653898045596*k4r-0.017578125*k5r)
+        k6s,k6e,k6i,k6r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.03709200011850479*k0s+0.17038392571223998*k3s+0.10726203044637328*k4s-0.015319437748624402*k5s+0.008273789163814023*k6s); y_e=e+h*(0.03709200011850479*k0e+0.17038392571223998*k3e+0.10726203044637328*k4e-0.015319437748624402*k5e+0.008273789163814023*k6e); y_i=i+h*(0.03709200011850479*k0i+0.17038392571223998*k3i+0.10726203044637328*k4i-0.015319437748624402*k5i+0.008273789163814023*k6i); y_r=r+h*(0.03709200011850479*k0r+0.17038392571223998*k3r+0.10726203044637328*k4r-0.015319437748624402*k5r+0.008273789163814023*k6r)
+        k7s,k7e,k7i,k7r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.6241109587160757*k0s-3.3608926294469414*k3s-0.868219346841726*k4s+27.592099699446707*k5s+20.154067550477894*k6s-43.48988418106996*k7s); y_e=e+h*(0.6241109587160757*k0e-3.3608926294469414*k3e-0.868219346841726*k4e+27.592099699446707*k5e+20.154067550477894*k6e-43.48988418106996*k7e); y_i=i+h*(0.6241109587160757*k0i-3.3608926294469414*k3i-0.868219346841726*k4i+27.592099699446707*k5i+20.154067550477894*k6i-43.48988418106996*k7i); y_r=r+h*(0.6241109587160757*k0r-3.3608926294469414*k3r-0.868219346841726*k4r+27.592099699446707*k5r+20.154067550477894*k6r-43.48988418106996*k7r)
+        k8s,k8e,k8i,k8r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(0.47766253643826434*k0s-2.4881146199716677*k3s-0.5902908268368429*k4s+21.230051448181193*k5s+15.279233632882423*k6s-33.28821096898486*k7s-0.020331201708508626*k8s); y_e=e+h*(0.47766253643826434*k0e-2.4881146199716677*k3e-0.5902908268368429*k4e+21.230051448181193*k5e+15.279233632882423*k6e-33.28821096898486*k7e-0.020331201708508626*k8e); y_i=i+h*(0.47766253643826434*k0i-2.4881146199716677*k3i-0.5902908268368429*k4i+21.230051448181193*k5i+15.279233632882423*k6i-33.28821096898486*k7i-0.020331201708508626*k8i); y_r=r+h*(0.47766253643826434*k0r-2.4881146199716677*k3r-0.5902908268368429*k4r+21.230051448181193*k5r+15.279233632882423*k6r-33.28821096898486*k7r-0.020331201708508626*k8r)
+        k9s,k9e,k9i,k9r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(-0.9371424300859873*k0s+5.186372428844064*k3s+1.0914373489967295*k4s-8.149787010746927*k5s-18.52006565999696*k6s+22.739487099350505*k7s+2.4936055526796523*k8s-3.0467644718982196*k9s); y_e=e+h*(-0.9371424300859873*k0e+5.186372428844064*k3e+1.0914373489967295*k4e-8.149787010746927*k5e-18.52006565999696*k6e+22.739487099350505*k7e+2.4936055526796523*k8e-3.0467644718982196*k9e); y_i=i+h*(-0.9371424300859873*k0i+5.186372428844064*k3i+1.0914373489967295*k4i-8.149787010746927*k5i-18.52006565999696*k6i+22.739487099350505*k7i+2.4936055526796523*k8i-3.0467644718982196*k9i); y_r=r+h*(-0.9371424300859873*k0r+5.186372428844064*k3r+1.0914373489967295*k4r-8.149787010746927*k5r-18.52006565999696*k6r+22.739487099350505*k7r+2.4936055526796523*k8r-3.0467644718982196*k9r)
+        k10s,k10e,k10i,k10r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+        y_s=s+h*(2.273310147516538*k0s-10.53449546673725*k3s-2.0008720582248625*k4s-17.9589318631188*k5s+27.94888452941996*k6s-2.8589982771350235*k7s-8.87285693353063*k8s+12.360567175794303*k9s+0.6433927460157636*k10s); y_e=e+h*(2.273310147516538*k0e-10.53449546673725*k3e-2.0008720582248625*k4e-17.9589318631188*k5e+27.94888452941996*k6e-2.8589982771350235*k7e-8.87285693353063*k8e+12.360567175794303*k9e+0.6433927460157636*k10e); y_i=i+h*(2.273310147516538*k0i-10.53449546673725*k3i-2.0008720582248625*k4i-17.9589318631188*k5i+27.94888452941996*k6i-2.8589982771350235*k7i-8.87285693353063*k8i+12.360567175794303*k9i+0.6433927460157636*k10i); y_r=r+h*(2.273310147516538*k0r-10.53449546673725*k3r-2.0008720582248625*k4r-17.9589318631188*k5r+27.94888452941996*k6r-2.8589982771350235*k7r-8.87285693353063*k8r+12.360567175794303*k9r+0.6433927460157636*k10r)
+        k11s,k11e,k11i,k11r=_rhs4_vals(y_s,y_e,y_i,y_r,beta,sigma,gamma,omega)
+
+        ns = s + h*(0.054293734116568765*k0s + 4.450312892752409*k5s + 1.8915178993145003*k6s - 5.801203960010585*k7s + 0.3111643669578199*k8s - 0.15216094966251608*k9s + 0.20136540080403034*k10s + 0.04471061572777259*k11s)
+        ne = e + h*(0.054293734116568765*k0e + 4.450312892752409*k5e + 1.8915178993145003*k6e - 5.801203960010585*k7e + 0.3111643669578199*k8e - 0.15216094966251608*k9e + 0.20136540080403034*k10e + 0.04471061572777259*k11e)
+        ni = i + h*(0.054293734116568765*k0i + 4.450312892752409*k5i + 1.8915178993145003*k6i - 5.801203960010585*k7i + 0.3111643669578199*k8i - 0.15216094966251608*k9i + 0.20136540080403034*k10i + 0.04471061572777259*k11i)
+        nr = r + h*(0.054293734116568765*k0r + 4.450312892752409*k5r + 1.8915178993145003*k6r - 5.801203960010585*k7r + 0.3111643669578199*k8r - 0.15216094966251608*k9r + 0.20136540080403034*k10r + 0.04471061572777259*k11r)
+        fns,fne,fni,fnr = _rhs4_vals(ns,ne,ni,nr,beta,sigma,gamma,omega)
+
+        scale_s = atol + max(abs(s), abs(ns))*rtol
+        scale_e = atol + max(abs(e), abs(ne))*rtol
+        scale_i = atol + max(abs(i), abs(ni))*rtol
+        scale_r = atol + max(abs(r), abs(nr))*rtol
+        e5s = 0.01312004499419488*k0s -1.2251564463762044*k5s -0.4957589496572502*k6s +1.6643771824549864*k7s -0.35032884874997366*k8s +0.3341791187130175*k9s +0.08192320648511571*k10s -0.022355307863886295*k11s
+        e5e = 0.01312004499419488*k0e -1.2251564463762044*k5e -0.4957589496572502*k6e +1.6643771824549864*k7e -0.35032884874997366*k8e +0.3341791187130175*k9e +0.08192320648511571*k10e -0.022355307863886295*k11e
+        e5i = 0.01312004499419488*k0i -1.2251564463762044*k5i -0.4957589496572502*k6i +1.6643771824549864*k7i -0.35032884874997366*k8i +0.3341791187130175*k9i +0.08192320648511571*k10i -0.022355307863886295*k11i
+        e5r = 0.01312004499419488*k0r -1.2251564463762044*k5r -0.4957589496572502*k6r +1.6643771824549864*k7r -0.35032884874997366*k8r +0.3341791187130175*k9r +0.08192320648511571*k10r -0.022355307863886295*k11r
+        e3s = -0.18980075407240762*k0s +4.450312892752409*k5s +1.8915178993145003*k6s -5.801203960010585*k7s -0.4226823213237914*k8s -0.15216094966251608*k9s +0.20136540080403034*k10s +0.022651792198360825*k11s
+        e3e = -0.18980075407240762*k0e +4.450312892752409*k5e +1.8915178993145003*k6e -5.801203960010585*k7e -0.4226823213237914*k8e -0.15216094966251608*k9e +0.20136540080403034*k10e +0.022651792198360825*k11e
+        e3i = -0.18980075407240762*k0i +4.450312892752409*k5i +1.8915178993145003*k6i -5.801203960010585*k7i -0.4226823213237914*k8i -0.15216094966251608*k9i +0.20136540080403034*k10i +0.022651792198360825*k11i
+        e3r = -0.18980075407240762*k0r +4.450312892752409*k5r +1.8915178993145003*k6r -5.801203960010585*k7r -0.4226823213237914*k8r -0.15216094966251608*k9r +0.20136540080403034*k10r +0.022651792198360825*k11r
+        q5s=e5s/scale_s; q5e=e5e/scale_e; q5i=e5i/scale_i; q5r=e5r/scale_r
+        q3s=e3s/scale_s; q3e=e3e/scale_e; q3i=e3i/scale_i; q3r=e3r/scale_r
+        err5_2=q5s*q5s+q5e*q5e+q5i*q5i+q5r*q5r
+        err3_2=q3s*q3s+q3e*q3e+q3i*q3i+q3r*q3r
+        if err5_2 == 0.0 and err3_2 == 0.0:
+            error_norm = 0.0
+        else:
+            error_norm = abs(h) * err5_2 / math.sqrt((err5_2 + 0.01*err3_2) * 4.0)
+
+        if error_norm < 1.0:
+            if error_norm == 0.0:
+                factor = 10.0
+            else:
+                factor = 0.9 * error_norm ** (-0.125)
+                if factor > 10.0:
+                    factor = 10.0
+            if step_rejected and factor > 1.0:
+                factor = 1.0
+            h_abs *= factor
+            s=ns; e=ne; i=ni; r=nr
+            f0s=fns; f0e=fne; f0i=fni; f0r=fnr
+            t += abs(h)
+            step_rejected = False
+        else:
+            factor = 0.9 * error_norm ** (-0.125)
+            if factor < 0.2:
+                factor = 0.2
+            h_abs *= factor
+            step_rejected = True
+        n += 1
+    total=s+e+i+r
+    if total != 0.0:
+        s/=total; e/=total; i/=total; r/=total
+    return s,e,i,r
+
+# Override the earlier core to use the closer SciPy-compatible method.
+@njit(cache=True, fastmath=True)
+def _solve_core(t0: float, t1: float, s: float, e: float, i: float, r: float,
+                beta: float, sigma: float, gamma: float, omega: float):
+    total = s + e + i + r
+    if total != 0.0 and abs(total - 1.0) > 1e-14:
+        s /= total; e /= total; i /= total; r /= total
+    dt = t1 - t0
+    if dt == 0.0:
+        return s, e, i, r
+    max_rate = beta + sigma + gamma + omega
+    if max_rate * abs(dt) < 1e-7:
+        return _rk4_fixed3(dt, s, e, i, beta, sigma, gamma, omega, abs(dt))
+    return _dop853_scipy(dt, s, e, i, r, beta, sigma, gamma, omega, 1.0e-8, 1.0e-10)
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:207: in __init__
+    _solve_core(0.0, 1.0, 0.89, 0.01, 0.005, 0.095, 0.35, 0.2, 0.1, 0.002)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7b46c18fc0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:207: in __init__
+    _solve_core(0.0, 1.0, 0.89, 0.01, 0.005, 0.095, 0.35, 0.2, 0.1, 0.002)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7b46c18fc0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 0.66s ==========================

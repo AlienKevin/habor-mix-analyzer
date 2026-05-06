@@ -1,0 +1,170 @@
+---- LAW BEGIN ----
+"""Scaling law for predicting unigram_normalized_loss."""
+
+import numpy as np
+
+
+# Parameters for the scaling law, fitted on training data
+# These are for the model:
+# loss = A + B * (num_characters / chars_scale)^(-beta)
+#            + C * (non_vocab_parameters / params_scale)^(-gamma)
+#            + D * (vocab_size / vocab_scale)
+
+VOCAB_SCALE = 1e4
+CHARS_SCALE = 1e9
+PARAMS_SCALE = 1e8
+
+A = -5.812042
+B = 2.606070
+BETA = 0.372062
+C = 0.232692
+GAMMA = 0.313467
+D = 0.026407
+
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts unigram_normalized_loss based on vocabulary size,
+    non-vocabulary parameters, and number of characters.
+
+    The discovered scaling law is:
+    loss = A + B * (num_characters / CHARS_SCALE)^(-beta)
+              + C * (non_vocab_parameters / PARAMS_SCALE)^(-gamma)
+              + D * (vocab_size / VOCAB_SCALE)
+
+    Args:
+        input_data: A list of dictionaries with keys 'vocab_size',
+                    'non_vocab_parameters', and 'num_characters'.
+        group: The experimental group (currently unused, all groups use same parameters).
+
+    Returns:
+        A list of dictionaries with 'unigram_normalized_loss' predictions.
+    """
+    results = []
+
+    for data_point in input_data:
+        vocab_size = data_point['vocab_size']
+        non_vocab_params = data_point['non_vocab_parameters']
+        num_chars = data_point['num_characters']
+
+        # Normalize variables
+        vocab_norm = vocab_size / VOCAB_SCALE
+        chars_norm = num_chars / CHARS_SCALE
+        params_norm = non_vocab_params / PARAMS_SCALE
+
+        # Compute prediction
+        loss = (A
+                + B * (chars_norm ** (-BETA))
+                + C * (params_norm ** (-GAMMA))
+                + D * vocab_norm)
+
+        results.append({'unigram_normalized_loss': loss})
+
+    return results---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law for Unigram Normalized Loss
+
+## Overview
+
+This document describes the discovered mathematical relationship between vocabulary size, non-vocabulary parameters, number of training characters, and the unigram-normalized loss in language models.
+
+## Mathematical Formula
+
+The discovered scaling law is:
+
+```
+unigram_normalized_loss = A
+    + B × (num_characters / 10⁹)^(-β)
+    + C × (non_vocab_parameters / 10⁸)^(-γ)
+    + D × (vocab_size / 10⁴)
+```
+
+Where the fitted parameters are:
+
+| Parameter | Value | Interpretation |
+|-----------|-------|----------------|
+| A | -5.812042 | Asymptotic loss floor (as all resources → ∞) |
+| B | 2.606070 | Magnitude of num_characters contribution |
+| β | 0.372062 | Exponent for num_characters (power-law decay rate) |
+| C | 0.232692 | Magnitude of non_vocab_parameters contribution |
+| γ | 0.313467 | Exponent for non_vocab_parameters (power-law decay rate) |
+| D | 0.026407 | Coefficient for vocab_size (linear contribution) |
+
+## Interpretation
+
+1. **Asymptotic Floor (A)**: The loss approaches -5.812042 as the model sees more training data and has more parameters. This represents the irreducible error from the unigram baseline.
+
+2. **Training Data Effect (B, β)**: More training characters reduce the loss according to a power law with exponent ~0.37. This means doubling the training data reduces the loss-contribution term by a factor of 2^(-0.37) ≈ 0.77.
+
+3. **Model Size Effect (C, γ)**: More non-vocabulary parameters also reduce the loss according to a power law with exponent ~0.31. The scaling is slower than for training data.
+
+4. **Vocabulary Size Effect (D)**: Larger vocabulary sizes slightly *increase* the loss (D > 0). This could be due to increased uncertainty from having more vocabulary items to predict, or the overhead of representing a larger embedding table.
+
+## Methodology
+
+### Data Exploration
+- Dataset: 1080 observations with 3 input features and 1 output
+- Single experimental group ("all_data")
+- Features cover: vocab_size (4K-64K), non_vocab_parameters (33M-1.1B), num_characters (180M-231B)
+
+### Model Selection Process
+
+1. **Initial Analysis**: Examined correlations between log-transformed variables. Found strong positive correlations between log(num_characters), log(non_vocab_parameters), and log(-loss).
+
+2. **Power Law Testing**: Tested simple power laws of the form `loss ∝ N^(-α)` for each variable independently. Found good fits (R² > 0.90) for num_characters and non_vocab_parameters.
+
+3. **Additive Model Form**: Combined power-law terms additively:
+   ```
+   loss = A + B × N^(-β) + C × M^(-γ) + D × V
+   ```
+   where N = num_characters, M = non_vocab_parameters, V = vocab_size
+
+4. **Parameter Fitting**: Used scipy's `curve_fit` with Trust Region Reflective algorithm. Variables were normalized by characteristic scales (10⁹ for chars, 10⁸ for params, 10⁴ for vocab) for numerical stability.
+
+5. **Model Comparison**: Tested various formulations:
+   - Without vocab_size: R² = 0.975
+   - With linear vocab: R² = 0.979 (best balance of fit and simplicity)
+   - With power-law vocab: R² = 0.975 (no improvement)
+   - With interaction term: R² = 0.980 (marginal improvement)
+
+### Final Model Selection
+The linear vocab model was selected as the final model because:
+- Highest R² (0.9793) among simple models
+- Lowest AIC given the number of parameters
+- Physical interpretability: vocab_size has a small linear effect on loss
+- Robust parameter estimates with reasonable standard errors
+
+## Model Diagnostics
+
+| Metric | Value |
+|--------|-------|
+| R² | 0.9793 |
+| MSE | 0.0131 |
+| Residual Std | 0.1146 |
+| Max Residual | 0.8011 |
+
+Residual analysis showed no significant correlations with any input variables, suggesting the model captures the main effects well.
+
+## Extrapolation Behavior
+
+- **As num_characters → ∞**: loss → A + C × (params/10⁸)^(-γ) + D × (vocab/10⁴) ≈ -5.6 to -5.8
+- **As non_vocab_parameters → ∞**: loss → A + B × (chars/10⁹)^(-β) + D × (vocab/10⁴) ≈ -3.2 to -5.5
+- **As vocab_size → ∞**: loss increases linearly (potential weakness for extrapolation)
+
+**Warning**: Extrapolating to very large vocabulary sizes may produce unreliable predictions as the linear relationship may not hold.
+
+## Group-Specific Parameters
+
+The dataset contained only one experimental group ("all_data"). Therefore, all predictions use the same parameter set. If additional groups were present, each would have its own fitted values for A, B, C, D, β, and γ.
+
+## Code Implementation
+
+The `law()` function in `/app/law.py` implements this formula with the following normalization scales:
+- `VOCAB_SCALE = 10⁴`
+- `CHARS_SCALE = 10⁹`
+- `PARAMS_SCALE = 10⁸`
+
+This normalization ensures numerical stability while preserving the mathematical relationships.---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9727343220459156

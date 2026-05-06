@@ -1,0 +1,155 @@
+---- LAW BEGIN ----
+import numpy as np
+from typing import List, Dict
+
+# Precomputed coefficients for each group.
+# Currently only 'all_data' is available.
+COEFFICIENTS = {
+    'all_data': {
+        'intercept': -16.030370846678412,
+        'x0': -0.37986664888029115,
+        'x1': -0.4346692668379693,
+        'x2': 1.9113617297790915,
+        'x0^2': -0.006840210877253662,
+        'x0 x1': -0.011831370073135682,
+        'x0 x2': 0.031059622682258037,
+        'x1^2': -0.0028393825242048814,
+        'x1 x2': 0.02916646192265907,
+        'x2^2': -0.05728584420197447
+    }
+}
+
+
+def law(input_data: List[Dict[str, float]], group: str) -> List[Dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    if group not in COEFFICIENTS:
+        raise ValueError(f"Group '{group}' not found in coefficients. Available groups: {list(COEFFICIENTS.keys())}")
+    
+    coeffs = COEFFICIENTS[group]
+    intercept = coeffs['intercept']
+    
+    predictions = []
+    for data_point in input_data:
+        # Extract input variables
+        vocab_size = data_point['vocab_size']
+        non_vocab_parameters = data_point['non_vocab_parameters']
+        num_characters = data_point['num_characters']
+        
+        # Ensure positive values for log
+        if vocab_size <= 0 or non_vocab_parameters <= 0 or num_characters <= 0:
+            raise ValueError("All input variables must be positive.")
+        
+        # Compute log transforms
+        log_vocab = np.log(vocab_size)
+        log_params = np.log(non_vocab_parameters)
+        log_chars = np.log(num_characters)
+        
+        # Compute log of positive loss
+        log_pos_loss = intercept
+        log_pos_loss += coeffs['x0'] * log_vocab
+        log_pos_loss += coeffs['x1'] * log_params
+        log_pos_loss += coeffs['x2'] * log_chars
+        log_pos_loss += coeffs['x0^2'] * (log_vocab ** 2)
+        log_pos_loss += coeffs['x0 x1'] * (log_vocab * log_params)
+        log_pos_loss += coeffs['x0 x2'] * (log_vocab * log_chars)
+        log_pos_loss += coeffs['x1^2'] * (log_params ** 2)
+        log_pos_loss += coeffs['x1 x2'] * (log_params * log_chars)
+        log_pos_loss += coeffs['x2^2'] * (log_chars ** 2)
+        
+        # Convert back to original scale (negative loss)
+        pos_loss = np.exp(log_pos_loss)
+        predicted_loss = -pos_loss
+        
+        predictions.append({'unigram_normalized_loss': predicted_loss})
+    
+    return predictions
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law for Unigram-Normalized Loss
+
+## Mathematical Formula
+
+The discovered scaling law is a quadratic model in log-space. The unigram-normalized loss (which is negative) is predicted as follows:
+
+Let:
+- V = vocab_size
+- P = non_vocab_parameters
+- C = num_characters
+- L = unigram_normalized_loss (negative)
+
+Define the positive loss: L_pos = -L > 0
+
+The model is:
+
+log(L_pos) = β₀ + β₁·log(V) + β₂·log(P) + β₃·log(C) + β₄·[log(V)]² + β₅·log(V)·log(P) + β₆·log(V)·log(C) + β₇·[log(P)]² + β₈·log(P)·log(C) + β₉·[log(C)]²
+
+Then the predicted loss is:
+
+L = -exp(log(L_pos))
+
+## Reasoning and Methodology
+
+1. **Exploratory Analysis**: The dataset contains 1080 rows with a single group 'all_data'. The variables have large ranges (vocab_size from 4096 to 64512, non_vocab_parameters from ~33 million to ~1.13 billion, num_characters from ~180 million to ~230 billion). The loss is negative, ranging from -5.34 to -0.70.
+
+2. **Initial Model**: A simple power law (log-linear) was fitted, giving R² ≈ 0.73. This suggests a multiplicative relationship but with non-linearities.
+
+3. **Quadratic Extension**: Adding quadratic and interaction terms in log-space significantly improved the fit to R² ≈ 0.95. This model captures diminishing or accelerating effects of each variable.
+
+4. **Model Selection**: The quadratic model was chosen over higher-degree polynomials to avoid overfitting while maintaining interpretability. Cross-validation indicated potential overfitting with higher degrees.
+
+5. **Fitting Procedure**: The model was fitted using ordinary least squares on the log-transformed positive loss. The coefficients were computed using scikit-learn's LinearRegression with PolynomialFeatures (degree=2).
+
+6. **Cross-Validation**: The data is sorted by non_vocab_parameters, which can cause biased cross-validation results. After shuffling the data, the quadratic model achieved a cross-validation R² of 0.947 ± 0.01, indicating excellent generalization. A simpler power law with offset model achieved R² of 0.874 ± 0.007, but the quadratic model was chosen for its superior performance.
+
+## Fitted Parameters for Group 'all_data'
+
+The coefficients for the group 'all_data' are:
+
+- Intercept (β₀): -16.030370846678412
+- β₁ (log(V)): -0.37986664888029115
+- β₂ (log(P)): -0.4346692668379693
+- β₃ (log(C)): 1.9113617297790915
+- β₄ ([log(V)]²): -0.006840210877253662
+- β₅ (log(V)·log(P)): -0.011831370073135682
+- β₆ (log(V)·log(C)): 0.031059622682258037
+- β₇ ([log(P)]²): -0.0028393825242048814
+- β₈ (log(P)·log(C)): 0.02916646192265907
+- β₉ ([log(C)]²): -0.05728584420197447
+
+## Model Performance
+
+- R² (full data): 0.9475
+- Adjusted R²: 0.9471
+- Cross-validation R² (shuffled): 0.9470 ± 0.0095
+- Mean Absolute Error: 0.1416
+- Root Mean Squared Error: 0.1792
+
+The model explains ~95% of the variance in the training data and generalizes well to unseen data (as indicated by cross-validation). The residuals show some patterns, but the quadratic model provides a good balance between accuracy and simplicity.
+
+## Implementation
+
+The `law` function in `law.py` implements this formula. It takes a list of dictionaries with the input variables and a group name, and returns a list of dictionaries with the predicted `unigram_normalized_loss`. The function uses precomputed coefficients stored in a dictionary.
+
+## Limitations and Future Work
+
+- The model is fitted only for the group 'all_data'. If new groups appear, their coefficients would need to be fitted separately.
+- The quadratic model may overfit if the data distribution changes significantly. Regularization (e.g., Ridge regression) could be considered for more robust predictions.
+- The model assumes that the relationship between the log-transformed variables is quadratic. If the true relationship is different, the model may not extrapolate well.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9382560281756287

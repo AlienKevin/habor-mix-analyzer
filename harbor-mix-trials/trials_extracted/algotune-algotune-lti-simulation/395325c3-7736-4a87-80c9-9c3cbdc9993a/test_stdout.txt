@@ -1,0 +1,124 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy import signal
+from scipy.signal import tf2ss, lfilter
+from scipy.linalg import expm
+
+class Solver:
+    def solve(self, problem, **kwargs):
+        num = problem["num"]
+        den = problem["den"]
+        u = np.asarray(problem["u"], dtype=float)
+        t = np.asarray(problem["t"], dtype=float)
+        n = len(t)
+        if n == 0:
+            return {"yout": []}
+
+        A, B, C, D = tf2ss(num, den)
+        nx = A.shape[0]
+        Cv = np.asarray(C, dtype=float).reshape(-1)
+        Bv = np.asarray(B, dtype=float).reshape(-1)
+        D_arr = np.asarray(D, dtype=float).reshape(-1)
+        d_scalar = float(D_arr[0]) if D_arr.size else 0.0
+
+        if nx == 0:
+            return {"yout": (d_scalar * u).tolist()}
+
+        if n == 1:
+            return {"yout": [d_scalar * float(u[0])]}
+
+        dt = np.diff(t)
+        uniform = np.allclose(dt, dt[0], rtol=1e-10, atol=1e-14)
+
+        if uniform:
+            h = float(dt[0])
+            m = nx + 2
+            M = np.zeros((m, m))
+            M[:nx, :nx] = A * h
+            M[:nx, nx] = Bv * h
+            M[nx, nx+1] = h
+            EM = expm(M)
+            Ad = EM[:nx, :nx]
+            G1 = EM[:nx, nx]
+            G2 = EM[:nx, nx+1]
+            Bd1_ = G2 / h
+            Bd0_ = G1 - Bd1_
+
+            # Eigendecomposition
+            try:
+                w, V = np.linalg.eig(Ad)
+                Vinv = np.linalg.inv(V)
+            except np.linalg.LinAlgError:
+                w = None
+
+            if w is not None and np.linalg.cond(V) < 1e10:
+                Vinv_Bd0 = Vinv @ Bd0_
+                Vinv_Bd1 = Vinv @ Bd1_
+                # W has shape (n-1, nx): W[k, i] = Vinv_Bd0[i] * u[k] + Vinv_Bd1[i] * u[k+1]
+                # z_i[0] = 0, z_i[k+1] = w_i * z_i[k] + W[k, i]
+                # Equivalent to filter: a=[1, -w_i], b=[0, 1] on input W[:, i] gives output starting at index 1
+                # Actually: define output r where r[0]=0, r[k+1] = w_i * r[k] + W[k, i]
+                # This is r[k] - w_i r[k-1] = W[k-1] for k>=1
+                # As lfilter: a=[1, -w_i], b=[1] on input shifted W (i.e. signal s where s[0]=0, s[k]=W[k-1])
+                # Easier: just call lfilter with b=[0,1], a=[1,-w_i] on full-length signal of W extended.
+                # Build x_in of length n: x_in[0..n-2] = W[:, i], x_in[n-1] = 0 (we don't need z[n])
+                # Actually we need z[k] for k=1..n-1. So compute lfilter output of length n on input where index k of x_in is W[k,i] for k<n-1, else 0.
+                # Filter: z[k] = w_i*z[k-1] + W[k-1, i] for k>=1, z[0]=0.
+                # As lfilter with a=[1, -w_i], b=[0, 1], input being x_in[k] = W[k-1, i] for k>=1, x_in[0]=anything (b[0]=0 so doesn't affect).
+                # Simpler: input signal of length n = [0, W[0,i], W[1,i], ..., W[n-2,i]]
+                # Output: lfilter(b=[1], a=[1,-w_i], x=this signal)? That gives y[k] - w_i y[k-1] = x[k]
+                # With x[0]=0: y[0]=0; y[1] = w_i*0 + 0 = 0? No wait x[1]=W[0,i], so y[1] = w_i*y[0] + x[1] = W[0,i]. Good.
+                # y[2] = w_i*y[1] + W[1,i] = w_i*W[0,i] + W[1,i]. Good.
+                # So we want z[k] = y[k]
+                # Construct input: shape (n, nx), pad W with zero row at top
+                # Use complex lfilter
+                W_input = np.zeros((n, nx), dtype=complex)
+                W_input[1:, :] = np.outer(u[:-1], Vinv_Bd0) + np.outer(u[1:], Vinv_Bd1)
+                # Apply lfilter axis=0 per column using filter coefficients per column
+                # lfilter doesn't support per-column a; loop over nx (small)
+                Cv_V = Cv @ V  # (nx,) complex
+                y_state = np.zeros(n, dtype=complex)
+                for i in range(nx):
+                    zi = lfilter([1.0], [1.0, -w[i]], W_input[:, i])
+                    y_state += Cv_V[i] * zi
+                y = y_state.real + d_scalar * u
+                return {"yout": y.tolist()}
+
+            # Fallback: direct loop
+            x = np.zeros(nx)
+            y = np.empty(n)
+            input_term = np.outer(u[:-1], Bd0_) + np.outer(u[1:], Bd1_)
+            for k in range(n - 1):
+                x = Ad @ x + input_term[k]
+                y[k+1] = Cv @ x
+            y[0] = 0.0
+            y += d_scalar * u
+            return {"yout": y.tolist()}
+
+        system = signal.lti(num, den)
+        tout, yout, xout = signal.lsim(system, u, t)
+        return {"yout": yout.tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 9.6771s
+Total Solver Time:   0.2472s
+Raw Speedup:         39.1507 x
+Final Reward (Score): 39.1507
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 124.01s (0:02:04) =========================

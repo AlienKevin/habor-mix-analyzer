@@ -1,0 +1,150 @@
+---- LAW BEGIN ----
+"""
+Scaling law for model parallelism evaluation.
+
+The discovered law relates brier_score to FLOPs (floating point operations)
+based on model size and parallelism in model parallel training.
+
+Law: brier_score = a + b * log(flops)
+
+where a and b are group-specific parameters.
+"""
+
+import numpy as np
+
+# Parameters for each experimental group, fitted using linear regression
+PARAMS = {
+    'abstract_narrative_understanding': {'a': -0.543309, 'b': 0.079536},
+    'analogical_similarity': {'a': -0.546496, 'b': 0.001500},
+    'arc': {'a': -0.113301, 'b': 0.025686},
+    'arithmetic': {'a': -0.289970, 'b': 0.037357},
+    'conceptual_combinations': {'a': -0.439732, 'b': 0.022262},
+    'hellaswag': {'a': -0.072849, 'b': 0.019391},
+    'hindu_knowledge': {'a': -0.422053, 'b': -0.013302},
+    'mmlu': {'a': -0.475745, 'b': -0.024106},
+    'parsinlu_qa_mc': {'a': -0.444446, 'b': 0.003990},
+}
+
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values. Expected keys include 'flops'.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    if group not in PARAMS:
+        raise ValueError(f"Unknown group: {group}. Available groups: {list(PARAMS.keys())}")
+
+    a = PARAMS[group]['a']
+    b = PARAMS[group]['b']
+
+    results = []
+    for point in input_data:
+        flops = point.get('flops')
+        if flops is None:
+            raise ValueError("Input data must contain 'flops' key")
+
+        if flops <= 0:
+            raise ValueError("flops must be positive")
+
+        log_flops = np.log(flops)
+        brier_score = a + b * log_flops
+
+        results.append({'brier_score': brier_score})
+
+    return results---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Discovery Report
+
+## Overview
+
+This analysis discovered the mathematical relationship governing model parallelism scaling for language model evaluation across multiple benchmark groups.
+
+## The Discovered Law
+
+The scaling law follows a **log-linear form**:
+
+```
+brier_score = a + b × log(flops)
+```
+
+Where:
+- `flops` represents the computational cost (floating point operations) during model training
+- `a` and `b` are group-specific coefficients
+- `brier_score` is the negative Brier score (lower magnitude = better calibration)
+
+## Methodology
+
+### Data Exploration
+The dataset contains 389 evaluation points across 9 benchmark groups:
+- abstract_narrative_understanding (32 points)
+- analogical_similarity (47 points)
+- arc (54 points)
+- arithmetic (44 points)
+- conceptual_combinations (31 points)
+- hellaswag (54 points)
+- hindu_knowledge (19 points)
+- mmlu (32 points)
+- parsinlu_qa_mc (54 points)
+
+### Candidate Models Tested
+
+Several functional forms were evaluated:
+
+1. **Linear**: `brier = a + b × flops`
+2. **Log-linear**: `brier = a + b × log(flops)` ✓ (Best overall fit)
+3. **Inverse**: `brier = a + b / flops`
+4. **Square root inverse**: `brier = a + b / sqrt(flops)`
+5. **Power law**: `brier = a + b × flops^c`
+6. **Hyperbolic decay**: `brier = a - b / (1 + flops)`
+7. **Exponential decay**: `brier = a + b × exp(-c × flops)`
+
+### Selection Criterion
+
+The log-linear form was selected because:
+- It provides a good balance between simplicity and explanatory power
+- It captures the diminishing returns pattern common in scaling laws
+- It has reasonable MSE across most groups
+- It follows established scaling law theory (power-law relationships manifest as linear in log-space)
+
+## Fitted Parameters
+
+| Group | a | b | MSE | R² |
+|-------|-------|--------|--------|--------|
+| abstract_narrative_understanding | -0.543309 | 0.079536 | 0.0074 | 0.759 |
+| analogical_similarity | -0.546496 | 0.001500 | 0.0026 | 0.003 |
+| arc | -0.113301 | 0.025686 | 0.0016 | 0.611 |
+| arithmetic | -0.289970 | 0.037357 | 0.0169 | 0.202 |
+| conceptual_combinations | -0.439732 | 0.022262 | 0.0046 | 0.213 |
+| hellaswag | -0.072849 | 0.019391 | 0.0010 | 0.581 |
+| hindu_knowledge | -0.422053 | -0.013302 | 0.0017 | 0.146 |
+| mmlu | -0.475745 | -0.024106 | 0.0012 | 0.547 |
+| parsinlu_qa_mc | -0.444446 | 0.003990 | 0.0040 | 0.015 |
+
+## Interpretation
+
+- **Parameter `a`** represents the asymptotic (limiting) Brier score as flops approaches infinity. Most groups have negative `a` values, indicating better calibration (more negative Brier scores) at higher compute.
+
+- **Parameter `b`** controls how quickly the Brier score changes with computational scale:
+  - Positive `b` (most groups): Brier score magnitude decreases (worsens) with more compute
+  - Negative `b` (hindu_knowledge, mmlu): Brier score magnitude increases (improves) with more compute
+
+## Notes
+
+The relationship is approximately linear in log-space, which is consistent with the well-known "scaling laws" observed in neural network training, where performance improvements follow power-law relationships with model size and compute.
+
+Some groups (analogical_similarity, parsinlu_qa_mc) show very weak correlation (R² < 0.02), suggesting the Brier score in these benchmarks may be influenced by factors beyond just compute scaling.---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Evaluation crashed: Input data must contain 'flops' key
+Reward written to /logs/verifier/reward.txt: -1.0

@@ -1,0 +1,106 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import jax
+import jax.numpy as jnp
+from diffrax import diffeqsolve, ODETerm, Tsit5, Kvaerno3, SaveAt, PIDController
+
+jax.config.update("jax_enable_x64", True)
+
+
+def _seirs_rhs(t, y, args):
+    beta, sigma, gamma, omega = args
+    S, E, I = y[0], y[1], y[2]
+    R = 1.0 - S - E - I
+    dS = -beta * S * I + omega * R
+    dE = beta * S * I - sigma * E
+    dI = sigma * E - gamma * I
+    return jnp.array([dS, dE, dI])
+
+
+_rhs_jit = jax.jit(_seirs_rhs)
+
+
+def _make_solver(solver_cls):
+    term = ODETerm(_rhs_jit)
+
+    def _solve(t0, t1, y0_3, params):
+        solver = solver_cls()
+        saveat = SaveAt(t1=True)
+        ctrl = PIDController(rtol=1e-8, atol=1e-10)
+        sol = diffeqsolve(
+            term, solver,
+            t0=t0, t1=t1,
+            dt0=(t1 - t0) / 1000.0,
+            y0=y0_3,
+            args=params,
+            saveat=saveat,
+            stepsize_controller=ctrl,
+            max_steps=500_000,
+            throw=False,
+        )
+        return sol.ys
+
+    return jax.jit(_solve)
+
+
+_tsit5_solve = _make_solver(Tsit5)
+_kvaerno3_solve = _make_solver(Kvaerno3)
+
+# Warmup
+_y = jnp.array([0.89, 0.01, 0.005], dtype=jnp.float64)
+_p = (0.35, 0.2, 0.1, 0.002)
+_tsit5_solve(0.0, 10.0, _y, _p)
+_kvaerno3_solve(0.0, 10.0, _y, _p)
+
+
+class Solver:
+    def solve(self, problem, **kwargs) -> list:
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
+        params = problem["params"]
+
+        beta = float(params["beta"])
+        sigma = float(params["sigma"])
+        gamma = float(params["gamma"])
+        omega = float(params["omega"])
+
+        y0_3 = jnp.array(y0[:3], dtype=jnp.float64)
+        p = (beta, sigma, gamma, omega)
+
+        result = _tsit5_solve(t0, t1, y0_3, p)
+        S, E, I = float(result[0, 0]), float(result[0, 1]), float(result[0, 2])
+        R = 1.0 - S - E - I
+        out = [S, E, I, R]
+
+        if all(np.isfinite(out)):
+            return out
+
+        result = _kvaerno3_solve(t0, t1, y0_3, p)
+        S, E, I = float(result[0, 0]), float(result[0, 1]), float(result[0, 2])
+        R = 1.0 - S - E - I
+        return [S, E, I, R]
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 8.2681s
+Total Solver Time:   0.1625s
+Raw Speedup:         50.8893 x
+Final Reward (Score): 50.8893
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 115.13s (0:01:55) =========================

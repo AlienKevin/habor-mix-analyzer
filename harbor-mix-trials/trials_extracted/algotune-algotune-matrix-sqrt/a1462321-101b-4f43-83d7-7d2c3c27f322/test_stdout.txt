@@ -1,0 +1,66 @@
+--- Final Solver (used for performance test) ---
+from typing import Any
+import numpy as np
+from scipy.linalg._matfuncs_schur_sqrtm import recursive_schur_sqrtm
+
+
+class Solver:
+    def solve(self, problem, **kwargs) -> Any:
+        A = problem["matrix"]
+        a = np.asarray(A)
+
+        # Coerce to a supported dtype: 'fdFD' (float32/64, complex64/128).
+        kind = a.dtype.kind
+        if kind in ('U', 'S', 'O'):
+            # Strings or Python objects: parse element-wise to complex.
+            a = np.array(A, dtype=np.complex128)
+        elif not np.issubdtype(a.dtype, np.inexact):
+            a = a.astype(np.float64)
+        elif a.dtype == np.float16:
+            a = a.astype(np.float32)
+        elif a.dtype.char == 'G':
+            a = a.astype(np.complex128)
+        elif a.dtype.char == 'g':
+            a = a.astype(np.float64)
+
+        if not a.flags['C_CONTIGUOUS']:
+            a = np.ascontiguousarray(a)
+
+        try:
+            X, _ill, _sing, info = recursive_schur_sqrtm(a)
+            if info < 0:
+                return {"sqrtm": {"X": []}}
+        except Exception:
+            return {"sqrtm": {"X": []}}
+
+        return {"sqrtm": {"X": X.tolist()}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 26.3074s
+Total Solver Time:   11.6375s
+Raw Speedup:         2.2606 x
+Final Reward (Score): 2.2606
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================= 3 passed, 1100 warnings in 552.68s (0:09:12) =================

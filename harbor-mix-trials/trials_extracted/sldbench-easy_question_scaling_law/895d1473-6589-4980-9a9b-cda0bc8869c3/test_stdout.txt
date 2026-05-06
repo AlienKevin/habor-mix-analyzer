@@ -1,0 +1,161 @@
+---- LAW BEGIN ----
+import numpy as np
+from scipy.optimize import curve_fit
+import datasets
+
+# Load training data
+ds = datasets.load_from_disk('/app/data')
+
+# Build data per group
+group_data = {}
+for row in ds:
+    g = row['group']
+    if g not in group_data:
+        group_data[g] = {'flops': [], 'brier_score': []}
+    group_data[g]['flops'].append(row['flops'])
+    group_data[g]['brier_score'].append(row['brier_score'])
+
+# Fit power law: loss = a + b * flops^c for each group
+def power_model(x, a, b, c):
+    return a + b * np.power(np.maximum(x, 1e-10), c)
+
+params = {}
+for group, data in group_data.items():
+    x = np.array(data['flops'])
+    y = np.array(data['brier_score'])
+    
+    best_mse = float('inf')
+    best_popt = None
+    for init in [(-0.5, -0.01, 0.1), (-0.5, 0.01, -0.1), (-0.3, -0.1, 0.05),
+                (-0.1, 0.05, 0.5), (-0.6, 0.5, 0.1), (-0.4, -0.1, 0.2)]:
+        try:
+            popt, _ = curve_fit(power_model, x, y, p0=init, maxfev=50000,
+                             bounds=([-1.0, -10, -5], [0.0, 10, 5]))
+            pred = power_model(x, *popt)
+            mse = np.mean((pred - y)**2)
+            if mse < best_mse:
+                best_mse = mse
+                best_popt = popt
+        except:
+            pass
+    
+    if best_popt is None:
+        # Fallback: linear fit
+        coeffs = np.polyfit(np.log(x), y, 1)
+        best_popt = (coeffs[1], coeffs[0], 0.0)
+    
+    params[group] = best_popt
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+    
+    The discovered law is: loss = a + b * flops^c
+    where 'flops' is derived from 'log_flops' (flops = 10^log_flops).
+    
+    Args:
+        input_data: A list of dictionaries with input variable names.
+        group: The experimental group name.
+    
+    Returns:
+        A list of dictionaries with predicted 'loss' values.
+    """
+    if group not in params:
+        # Return zeros if group unknown
+        return [{'loss': 0.0} for _ in input_data]
+    
+    a, b, c = params[group]
+    results = []
+    
+    for item in input_data:
+        # Extract flops from input
+        if 'flops' in item:
+            flops = item['flops']
+        elif 'log_flops' in item:
+            flops = 10 ** item['log_flops']
+        elif 'num_params' in item and 'parallel_size' in item:
+            # Reconstruct flops from num_params and parallel_size
+            # flops encodes both model size and parallel efficiency
+            num_params = item['num_params']
+            parallel_size = item['parallel_size']
+            # Use a proxy: flops proportional to num_params / parallel_size
+            # (parallel_size reduces per-instance compute)
+            flops = num_params / parallel_size * 1e-9  # approximate scaling
+        else:
+            flops = 0.0
+        
+        # Predict loss using power law
+        loss = a + b * (max(flops, 1e-10) ** c)
+        results.append({'loss': float(loss)})
+    
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Discovery Report
+
+## 1. The Discovered Mathematical Formula
+
+The discovered scaling law is a **power law** of the form:
+
+$$\text{loss} = a + b \cdot C^c$$
+
+where:
+- `loss` is the brier_score (language modeling loss metric)
+- `C` is the floating-point operations per token (flops), representing training compute
+- `a`, `b`, and `c` are group-specific parameters
+
+## 2. Methodology
+
+### Data Exploration
+The dataset contains:
+- **389 training examples** across 9 benchmark groups
+- Variables: `group` (benchmark), `log_flops`, `flops`, `brier_score`, `model_name`
+- Each model appears once per group with consistent flops across all groups
+- Different models have different flops values representing different compute budgets
+
+### Key Observations
+1. **flops is model-specific**: Each model has the same flops value across all benchmark groups
+2. **brier_score is group-specific**: The same model produces different brier_scores on different benchmarks
+3. **Scaling relationship**: Larger flops (more compute) generally leads to better (more negative) brier_scores
+
+### Fitting Process
+1. For each group, extracted (flops, brier_score) pairs
+2. Fitted the power law model: `loss = a + b * flops^c`
+3. Used scipy's curve_fit with multiple initializations to avoid local minima
+4. Selected the fit with lowest MSE for each group
+
+## 3. Fitted Parameters per Group
+
+| Group | a | b | c | Training MSE |
+|-------|---|---|---|---|
+| abstract_narrative_understanding | -1.000000 | 0.462993 | 0.128002 | 0.007878 |
+| analogical_similarity | -0.539033 | -0.000003 | -5.000000 | 0.002197 |
+| arc | -1.000000 | 0.888619 | 0.026612 | 0.001630 |
+| arithmetic | -1.000000 | 0.715927 | 0.044500 | 0.017300 |
+| conceptual_combinations | -0.388300 | -0.018341 | -1.115437 | 0.003625 |
+| hellaswag | -1.000000 | 0.928434 | 0.019568 | 0.001040 |
+| hindu_knowledge | -0.383104 | -0.034420 | 0.374808 | 0.001705 |
+| mmlu | -0.666522 | 0.186844 | -0.141239 | 0.001144 |
+| parsinlu_qa_mc | -0.424052 | -0.009792 | -1.380607 | 0.002959 |
+
+## 4. Interpretation
+
+The power law indicates that the loss scales as a power of compute:
+- For most groups with positive `b` and small positive `c`, loss improves (becomes more negative) slowly as compute increases
+- For groups with negative exponents, the relationship is inverse (loss decreases with increasing flops to a power)
+- The `a` parameter represents the asymptotic loss as flops → ∞
+- The `b` parameter controls the magnitude of the compute effect
+- The `c` parameter controls the exponent (how quickly loss improves with compute)
+
+## 5. Alternative Formulations Considered
+
+- **Linear on log_flops**: `loss = a + b * log(flops)` — works for some groups but not all
+- **Power law with different exponents**: Tried many forms; the general `a + b*flops^c` form fitted best
+- **Quadratic on log_flops**: `loss = a*log(flops)^2 + b*log(flops) + c` — good for some groups but less generalizable
+
+The chosen power law provides a good balance between simplicity, interpretability, and fit quality across all groups.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Evaluation crashed: Missing columns. Expected ['brier_score']
+Reward written to /logs/verifier/reward.txt: -1.0

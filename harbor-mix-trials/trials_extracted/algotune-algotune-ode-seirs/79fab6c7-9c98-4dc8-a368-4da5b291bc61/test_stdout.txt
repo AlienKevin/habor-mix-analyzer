@@ -1,0 +1,242 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from typing import Any
+import numba
+
+# Numba JIT compiled RHS
+@numba.njit(cache=True)
+def _seirs_rhs(y, beta, sigma, gamma, omega):
+    """SEIRS model RHS."""
+    S, E, I, R = y[0], y[1], y[2], y[3]
+    dS = -beta * S * I + omega * R
+    dE = beta * S * I - sigma * E
+    dI = sigma * E - gamma * I
+    dR = gamma * I - omega * R
+    return np.array([dS, dE, dI, dR])
+
+# Numba JIT compiled RK45 step - Dormand-Prince method
+@numba.njit(cache=True)
+def _rk45_step(y, dt, beta, sigma, gamma, omega):
+    """Perform one Dormand-Prince RK45 step. Returns (y_new, error_estimate)."""
+    k1 = dt * _seirs_rhs(y, beta, sigma, gamma, omega)
+    k2 = dt * _seirs_rhs(y + 0.25 * k1, beta, sigma, gamma, omega)
+    k3 = dt * _seirs_rhs(y + 3.0/32.0 * k1 + 9.0/32.0 * k2, beta, sigma, gamma, omega)
+    k4 = dt * _seirs_rhs(y + 1932.0/2197.0 * k1 - 7200.0/2197.0 * k2 + 7296.0/2197.0 * k3, beta, sigma, gamma, omega)
+    k5 = dt * _seirs_rhs(y + 439.0/216.0 * k1 - 8.0 * k2 + 3680.0/513.0 * k3 - 845.0/4104.0 * k4, beta, sigma, gamma, omega)
+    k6 = dt * _seirs_rhs(y - 8.0/27.0 * k1 + 2.0 * k2 - 3544.0/2565.0 * k3 + 1859.0/4104.0 * k4 - 11.0/40.0 * k5, beta, sigma, gamma, omega)
+    
+    # 5th order solution
+    y_new = y + (16.0/135.0 * k1 + 6656.0/12825.0 * k3 + 28561.0/56430.0 * k4 - 9.0/50.0 * k5 + 2.0/55.0 * k6)
+    
+    # 4th order solution (for error estimation)
+    y_4th = y + (25.0/216.0 * k1 + 1408.0/2565.0 * k3 + 2197.0/4104.0 * k4 - 1.0/5.0 * k5)
+    
+    error = np.max(np.abs(y_new - y_4th))
+    return y_new, error
+
+# Numba JIT compiled adaptive integrator
+@numba.njit(cache=True)
+def _integrate(y0, t0, t1, beta, sigma, gamma, omega):
+    """Adaptive RK45 integration from t0 to t1."""
+    rtol = 1e-8
+    atol = 1e-10
+    
+    y = y0.copy()
+    t = t0
+    dt = 0.01  # Initial step size
+    
+    while t < t1:
+        if t + dt > t1:
+            dt = t1 - t
+        
+        y_new, error = _rk45_step(y, dt, beta, sigma, gamma, omega)
+        
+        # Error tolerance
+        max_y = max(abs(y_new[0]), abs(y_new[1]), abs(y_new[2]), abs(y_new[3]))
+        tol = atol + rtol * max_y
+        
+        if error <= tol:
+            y = y_new
+            t += dt
+            # Increase step size for next step
+            if error > 1e-16:
+                dt *= min(5.0, 0.9 * (tol / error) ** 0.2)
+        else:
+            # Decrease step size and retry
+            dt *= max(0.1, 0.9 * (tol / error) ** 0.25)
+    
+    return y
+
+# Enforce conservation law and non-negativity
+@numba.njit(cache=True)
+def _enforce_conservation(y):
+    """Ensure S + E + I + R = 1.0 and all values are non-negative."""
+    # Clip negative values to zero
+    if y[0] < 0: y[0] = 0.0
+    if y[1] < 0: y[1] = 0.0
+    if y[2] < 0: y[2] = 0.0
+    if y[3] < 0: y[3] = 0.0
+    
+    # Normalize to sum to 1
+    total = y[0] + y[1] + y[2] + y[3]
+    if total > 0:
+        y[0] /= total
+        y[1] /= total
+        y[2] /= total
+        y[3] /= total
+    return y
+
+
+class Solver:
+    def __init__(self):
+        # Warmup JIT compilation - this time doesn't count toward runtime
+        _integrate(np.array([0.9, 0.05, 0.03, 0.02]), 0.0, 0.1, 0.3, 0.2, 0.1, 0.01)
+    
+    def solve(self, problem, **kwargs) -> Any:
+        t0 = problem["t0"]
+        t1 = problem["t1"]
+        y0 = np.array(problem["y0"])
+        params = problem["params"]
+        beta = params["beta"]
+        sigma = params["sigma"]
+        gamma = params["gamma"]
+        omega = params["omega"]
+        
+        # Handle t1 <= t0 case
+        if t1 <= t0:
+            result = y0.copy()
+        else:
+            result = _integrate(y0, t0, t1, beta, sigma, gamma, omega)
+        
+        # Enforce conservation law and non-negativity
+        result = _enforce_conservation(result)
+        return result.tolist()
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:92: in __init__
+    _integrate(np.array([0.9, 0.05, 0.03, 0.02]), 0.0, 0.1, 0.3, 0.2, 0.1, 0.01)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x751e8c0ac0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:92: in __init__
+    _integrate(np.array([0.9, 0.05, 0.03, 0.02]), 0.0, 0.1, 0.3, 0.2, 0.1, 0.01)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x751e8c0ac0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 0.66s ==========================

@@ -1,0 +1,130 @@
+---- LAW BEGIN ----
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    # Parameters fitted for each experimental group.
+    # The functional form is the same for all groups:
+    #   loss = L0 + A * (vocab_size / non_vocab_parameters)^a + B / (num_characters)^b
+    params = {
+        "all_data": {
+            "L0": -5.66849057,
+            "A": 19.84199108,
+            "a": 0.58897926,
+            "B": 5633.68539,
+            "b": 0.37038957,
+        }
+    }
+
+    p = params.get(group, params["all_data"])
+
+    results = []
+    for point in input_data:
+        V = point["vocab_size"]
+        N = point["non_vocab_parameters"]
+        D = point["num_characters"]
+
+        loss = p["L0"] + p["A"] * (V / N) ** p["a"] + p["B"] / (D ** p["b"])
+
+        results.append({"unigram_normalized_loss": loss})
+
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law for Vocabulary Size and Language Model Performance
+
+## Mathematical Formula
+
+The discovered scaling law predicts the **unigram-normalized loss** as a function of vocabulary size, non-vocabulary parameters, and training data size:
+
+```
+unigram_normalized_loss = L0 + A * (vocab_size / non_vocab_parameters)^a + B / (num_characters)^b
+```
+
+### Parameters (group: `all_data`)
+
+| Parameter | Fitted Value | Description |
+|-----------|-------------|-------------|
+| L0 | -5.66849057 | Irreducible loss offset (intercept) |
+| A  | 19.84199108 | Coefficient for the vocabulary-to-parameters ratio term |
+| a  | 0.58897926 | Exponent for the (V/N) ratio |
+| B  | 5633.68539 | Coefficient for the data scale term |
+| b  | 0.37038957 | Exponent for the data scale term |
+
+### Model Performance (on training data)
+
+- **MSE**: 0.01073
+- **MAE**: 0.07196
+- **R-squared**: 0.98312
+- 95.7% of predictions within +/- 0.2 of the actual loss
+
+## Reasoning and Methodology
+
+### 1. Data Exploration
+
+The dataset contains 1,080 experimental points with:
+- 9 vocabulary sizes: 4,096 to 64,512
+- 6 non-vocabulary parameter counts: 33M to 1.13B
+- 20 different training data sizes (num_characters) per (V, N) combination
+- All data in a single group: "all_data"
+
+Initial exploration revealed:
+- Loss becomes more negative (better) as non-vocab parameters increase (power-law trend)
+- Loss becomes more negative as training characters increase (power-law trend)
+- Vocabulary size has a smaller, non-monotonic effect: moderate V (~16K) is optimal
+
+### 2. Theoretical Foundation
+
+The form is grounded in the Chinchilla scaling law framework, where model loss decomposes as:
+
+```
+L(N, D) = E + A/N^alpha + B/D^beta
+```
+
+where N = non-embedding parameters and D = training data size.
+
+For unigram-normalized loss, we subtract the unigram entropy baseline:
+
+```
+L_uni_norm = L_model - H_unigram
+```
+
+### 3. Key Insight: Vocabulary-Parameter Interaction
+
+A critical discovery was that vocabulary size and non-vocabulary parameters interact through a **ratio** (V/N) rather than as independent additive terms. This captures the physical intuition that:
+
+- A larger vocabulary "dilutes" the effectiveness of non-vocabulary parameters (each parameter must handle more token types)
+- The relevant quantity is the **vocabulary-to-parameters ratio** (V/N), representing how many token types each non-vocab parameter is responsible for
+
+This is supported by the fit: allowing separate exponents for V and N in the term `A * V^g / N^h` yields g = 0.599 and h = 0.584, with ratio g/h = 1.025 -- essentially equal, confirming the (V/N) ratio form.
+
+### 4. Model Selection
+
+Several functional forms were systematically compared:
+
+| Model | MSE |
+|-------|-----|
+| Chinchilla (N + D only, no V) | 0.01581 |
+| Chinchilla + log(V) additive | 0.01326 |
+| **Chinchilla + (V/N)^a interaction** | **0.01073** |
+| Chinchilla + V^g/N^h (general) | 0.01073 |
+
+The interaction model (V/N)^a significantly outperforms additive V terms (32% MSE reduction vs no-V, 19% vs additive log(V)). The general model (V^g/N^h) gives no meaningful improvement over the simpler (V/N)^a form, confirming the ratio is the correct structure.
+
+### 5. Fitting Procedure
+
+Parameters were fitted using:
+1. Global optimization via differential evolution (SciPy) with 50-population, 2000-generation search
+2. Local refinement via Nelder-Mead simplex optimization
+3. Bounds constrained to physically meaningful ranges (exponents between 0 and 1, etc.)
+
+## Interpretation
+
+- **L0 = -5.67**: The irreducible unigram-normalized loss when the model has infinite parameters and infinite data. Negative because a well-trained model substantially outperforms the unigram baseline.
+
+- **(V/N)^0.59 term**: Controls how vocabulary size affects loss given the parameter budget. When V/N is large (many token types per parameter), loss degrades. The exponent ~0.59 indicates sub-linear scaling.
+
+- **D^(-0.37) term**: The data scaling term with exponent ~0.37 -- consistent with typical Chinchilla-style exponents (0.3-0.4 range) for the data dimension.
+
+- Noteworthy: the vocabulary term is **not** a simple log(V) correction. The unigram normalization already accounts for much of the V-dependence, and the residual V effect manifests through its ratio with non-vocab parameters rather than independently.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9755755134330271

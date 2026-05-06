@@ -1,0 +1,114 @@
+--- Final Solver (used for performance test) ---
+from __future__ import annotations
+
+import numpy as np
+
+try:
+    import scipy.linalg._matfuncs as _scipy_matfuncs
+except Exception:  # pragma: no cover
+    _scipy_matfuncs = None
+
+try:
+    import scipy.linalg as _scipy_linalg
+except Exception:  # pragma: no cover
+    _scipy_linalg = None
+
+
+class Solver:
+    def solve(self, problem, **kwargs):
+        A = problem["matrix"]
+        if not isinstance(A, np.ndarray):
+            A = np.asarray(A, dtype=np.complex128)
+        elif A.dtype.kind not in "fc":
+            A = A.astype(np.complex128, copy=False)
+
+        n = A.shape[0]
+
+        if n == 0:
+            return {"sqrtm": {"X": []}}
+
+        if n == 1:
+            return {"sqrtm": {"X": [[np.sqrt(A[0, 0] + 0j)]]}}
+
+        if n == 2:
+            X = self._sqrt2(A)
+            if X is not None:
+                return {"sqrtm": {"X": X.tolist()}}
+
+        if self._is_diagonal(A, n):
+            X = np.diag(np.sqrt(np.diagonal(A).astype(np.complex128, copy=False)))
+            return {"sqrtm": {"X": X.tolist()}}
+
+        try:
+            if _scipy_matfuncs is not None:
+                X = _scipy_matfuncs.recursive_schur_sqrtm(A)[0]
+            else:
+                X = _scipy_linalg.sqrtm(A)
+                if isinstance(X, tuple):
+                    X = X[0]
+        except Exception:
+            try:
+                X = _scipy_linalg.sqrtm(A)
+                if isinstance(X, tuple):
+                    X = X[0]
+            except Exception:
+                return {"sqrtm": {"X": []}}
+
+        return {"sqrtm": {"X": X.tolist()}}
+
+    @staticmethod
+    def _is_diagonal(A, n):
+        # Avoid an O(n^2) scan on large dense matrices; for those the Schur cost
+        # dominates and sparse diagonal cases are uncommon in the benchmark mix.
+        if n > 256:
+            return False
+        return not np.any(A - np.diag(np.diagonal(A)))
+
+    @staticmethod
+    def _sqrt2(A):
+        a = A[0, 0]
+        b = A[0, 1]
+        c = A[1, 0]
+        d = A[1, 1]
+        det = (a * d - b * c) + 0j
+        s = np.sqrt(det)
+        t = np.sqrt(a + d + 2.0 * s + 0j)
+        if abs(t) > 1e-14:
+            return np.array([[a + s, b], [c, d + s]], dtype=np.complex128) / t
+
+        # If the first branch hits a zero denominator, the other sign may work.
+        t = np.sqrt(a + d - 2.0 * s + 0j)
+        if abs(t) > 1e-14:
+            return np.array([[a - s, b], [c, d - s]], dtype=np.complex128) / t
+
+        return None
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 31.0110s
+Total Solver Time:   12.0130s
+Raw Speedup:         2.5815 x
+Final Reward (Score): 2.5815
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================= 3 passed, 1100 warnings in 631.35s (0:10:31) =================

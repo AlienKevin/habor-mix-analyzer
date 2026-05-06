@@ -1,0 +1,144 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy import signal
+from scipy.linalg import expm
+from numba import njit
+from typing import Any
+
+
+@njit
+def _simulate_foh(Ad, Bd, B1, C_flat, D_val, u, dt):
+    """
+    FOH discrete-time simulation with numba JIT compilation.
+    
+    State update: x[k+1] = Ad*x[k] + Bd*u[k] + B1*(u[k+1]-u[k])/dt
+    Output:       y[k]   = C*x[k] + D*u[k]
+    """
+    N = len(u)
+    n = Ad.shape[0]
+    x = np.zeros(n)
+    yout = np.zeros(N)
+    inv_dt = 1.0 / dt
+    
+    for i in range(N):
+        # y[i] = C @ x + D * u[i]
+        y_val = D_val * u[i]
+        for j in range(n):
+            y_val += C_flat[j] * x[j]
+        yout[i] = y_val
+
+        # x[k+1] = Ad @ x[k] + Bd * u[k] + B1 * du[k]
+        if i < N - 1:
+            du = (u[i + 1] - u[i]) * inv_dt
+        else:
+            du = 0.0
+        
+        x_new = np.zeros(n)
+        for j in range(n):
+            s = Bd[j] * u[i] + B1[j] * du
+            for k in range(n):
+                s += Ad[j, k] * x[k]
+            x_new[j] = s
+        x = x_new
+    return yout
+
+
+# Warm up the JIT compiler at module load time
+_warmup_Ad = np.array([[0.9, -0.01], [0.01, 0.99]])
+_warmup_Bd = np.array([0.01, 0.0001])
+_warmup_B1 = np.array([5e-5, 1e-7])
+_warmup_C = np.array([0.0, 1.0])
+_warmup_D = 0.0
+_warmup_u = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+_warmup_dt = 0.1
+_ = _simulate_foh(_warmup_Ad, _warmup_Bd, _warmup_B1, _warmup_C, _warmup_D, _warmup_u, _warmup_dt)
+
+
+class Solver:
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, list[float]]:
+        """
+        Solves the LTI simulation problem using FOH discretization + numba-accelerated
+        discrete-time simulation.
+
+        Approach:
+        1. Convert transfer function to state-space (observable canonical form via scipy)
+        2. Discretize using First-Order Hold (FOH) via augmented matrix exponential
+        3. Run discrete-time simulation with numba JIT-compiled loop
+
+        The FOH discretization uses the augmented matrix:
+            M = [[A, B, 0],
+                 [0, 0, 1],
+                 [0, 0, 0]]
+        Then exp(M*dt) gives Ad, Bd, B1 where:
+            x[k+1] = Ad*x[k] + Bd*u[k] + B1*(u[k+1]-u[k])/dt
+            y[k]   = C*x[k] + D*u[k]
+
+        This exactly matches scipy.signal.lsim's linear input interpolation.
+        """
+        num = np.asarray(problem["num"], dtype=np.float64)
+        den = np.asarray(problem["den"], dtype=np.float64)
+        u = np.asarray(problem["u"], dtype=np.float64)
+        t = np.asarray(problem["t"], dtype=np.float64)
+
+        N = len(t)
+
+        # Edge case: single time point
+        if N <= 1:
+            den_norm = den / den[0]
+            num_norm = num / den[0]
+            n_ord = len(den_norm) - 1
+            num_full = np.zeros(n_ord + 1)
+            num_full[n_ord + 1 - len(num_norm):] = num_norm
+            D_val = num_full[0]
+            yout = np.array([D_val * u[0]]) if N == 1 else np.array([])
+            return {"yout": yout.tolist()}
+
+        dt = t[1] - t[0]
+
+        # Convert transfer function to state-space
+        A, B, C, D = signal.tf2ss(num, den)
+        n = A.shape[0]
+        B_flat = B.flatten()
+        C_flat = C.flatten()
+        D_val = D.flatten()[0]
+
+        # FOH discretization via augmented matrix exponential
+        # M = [[A, B, 0], [0, 0, 1], [0, 0, 0]]
+        M = np.zeros((n + 2, n + 2))
+        M[:n, :n] = A
+        M[:n, n] = B_flat
+        M[n, n + 1] = 1.0
+
+        expM = expm(M * dt)
+        Ad = expM[:n, :n]
+        Bd = expM[:n, n]
+        B1 = expM[:n, n + 1]
+
+        # Numba-accelerated discrete simulation
+        yout = _simulate_foh(Ad, Bd, B1, C_flat, D_val, u, dt)
+
+        return {"yout": yout.tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 9.3703s
+Total Solver Time:   0.0959s
+Raw Speedup:         97.7077 x
+Final Reward (Score): 97.7077
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 116.95s (0:01:56) =========================

@@ -1,0 +1,183 @@
+---- LAW BEGIN ----
+import json
+import os
+import numpy as np
+
+# Load fitted parameters
+_params_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sigmoid_params.json')
+with open(_params_path, 'r') as _f:
+    _GROUP_PARAMS = json.load(_f)
+
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    The scaling law uses a generalized sigmoid functional form:
+        brier_score = a / (1 + b * flops^c) + d
+
+    This captures how the Brier score (a measure of prediction quality, where more
+    negative is better) scales with computational budget (FLOPs) across different
+    evaluation benchmarks.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    params = _GROUP_PARAMS.get(group)
+    if params is None:
+        # Fallback: predict mean brier_score for unknown groups
+        return [{"brier_score": -0.3} for _ in input_data]
+
+    a = float(params["a"])
+    b = float(params["b"])
+    c = float(params["c"])
+    d = float(params["d"])
+
+    results = []
+    for point in input_data:
+        flops = float(point["flops"])
+        # Compute sigmoid: a / (1 + b * flops^c) + d
+        # Handle edge cases for numerical stability
+        try:
+            flops_safe = max(flops, 1e-15)
+            fc = np.power(flops_safe, c)
+            denom = 1.0 + b * fc
+            if abs(denom) < 1e-15:
+                pred = d  # fallback when denominator is near zero
+            else:
+                pred = a / denom + d
+        except (OverflowError, ValueError, np.FloatingPointError):
+            # For very large/small values, fall back to asymptotic behavior
+            if c > 0:
+                # flops^c grows large, so denom ~ b*flops^c, pred ~ a/(b*flops^c) + d -> d
+                pred = d
+            else:
+                # flops^c -> 0 for large flops, so denom ~ 1, pred ~ a + d
+                pred = a + d
+
+        results.append({"brier_score": float(pred)})
+
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Discovery: Brier Score vs. FLOPs
+
+## Mathematical Formula
+
+The discovered scaling law uses a **generalized sigmoid** functional form:
+
+```
+brier_score = a / (1 + b × flops^c) + d
+```
+
+Where:
+- `flops` is the computational budget (input variable)
+- `brier_score` is the prediction quality metric (output variable; more negative = better)
+- `a`, `b`, `c`, `d` are group-specific fitted parameters
+
+This functional form is a generalized logistic/sigmoid curve that captures:
+1. **Asymptotic behavior at low FLOPs**: As flops → 0, the prediction approaches `a/(1+b·0^c) + d` (which depends on the sign of c)
+2. **Asymptotic behavior at high FLOPs**: As flops → ∞, the prediction approaches a limiting value
+3. **Smooth transition**: The exponent `c` controls the rate of transition between regimes
+
+### Special Cases
+
+This form generalizes several common scaling law forms:
+- When `b = 0`: reduces to a constant `a + d`
+- When `c > 0` and `b > 0`: sigmoid-like saturation (improvement plateaus)
+- When `c < 0` and `b > 0`: power-law-like decay toward an asymptote
+- When `|b|` is very large: approximates a pure power law `a/(b·flops^c) + d`
+
+## Methodology
+
+### 1. Data Exploration
+
+The dataset contains 389 data points across 9 evaluation benchmark groups, with columns:
+- `group`: The evaluation benchmark name
+- `flops`: Computational budget (FLOPs, in some normalized unit)
+- `log_flops`: log10(flops)
+- `brier_score`: The output metric (negative values, more negative = better)
+- `model_name`: The language model used
+
+Key observations:
+- `log_flops = log10(flops)` (redundant variable)
+- Each model has a constant `flops` value across all groups
+- `brier_score` varies by both model and group
+- The data is noisy, especially for some groups
+
+### 2. Model Selection
+
+Multiple functional forms were tested for each group:
+
+| Model Form | Formula | Parameters |
+|-----------|---------|------------|
+| Linear | a·log10(flops) + b | 2 |
+| Quadratic | a·log10(flops)² + b·log10(flops) + c | 3 |
+| Cubic | a·log10(flops)³ + b·log10(flops)² + c·log10(flops) + d | 4 |
+| Power Law | a·flops^b | 2 |
+| Power + Offset | a·flops^b + c | 3 |
+| Inverse Power | a + b/flops^c | 3 |
+| **Generalized Sigmoid** | **a/(1+b·flops^c) + d** | **4** |
+
+The generalized sigmoid form was selected because:
+1. It achieved the **lowest overall weighted RMSE** across all groups
+2. It provides **physically meaningful asymptotic behavior** for extrapolation
+3. It generalizes power laws and constants as special cases
+4. It has a bounded range, preventing unrealistic predictions during extrapolation
+
+### 3. Fitting Procedure
+
+For each group, the sigmoid parameters were fitted using:
+- `scipy.optimize.curve_fit` with Levenberg-Marquardt optimization
+- Extensive grid search over initial conditions (8×6×7×5 = 1,680 starting points per group)
+- Selection of the fit with the lowest RMSE and finite parameters
+- Numerical safeguards for edge cases (overflows, near-zero denominators)
+
+## Fitted Parameters Per Group
+
+| Group | a | b | c | d | RMSE |
+|-------|-------|-------|-------|-------|-------|
+| **mmlu** | -0.1186 | 1.7275 | -1.4139 | -0.4247 | 0.0330 |
+| **parsinlu_qa_mc** | -0.1772 | 33.6751 | 2.6123 | -0.4240 | 0.0541 |
+| **arithmetic** | 1.4518 | -387.3788 | 2.2844 | -0.1862 | 0.0897 |
+| **hindu_knowledge** | 0.0460 | ~0 | 71.2025 | -0.4426 | 0.0344 |
+| **analogical_similarity** | 0.3452 | ~0 | -22.8414 | -0.8846 | 0.0463 |
+| **conceptual_combinations** | 0.1217 | ~0 | -41.0285 | -0.5160 | 0.0581 |
+| **hellaswag** | 0.2763 | 0.2014 | -1.2115 | -0.2794 | 0.0161 |
+| **arc** | -0.6381 | 7.5916 | 0.7763 | -0.0153 | 0.0257 |
+| **abstract_narrative_understanding** | -1.1487 | 0.6270 | 0.2939 | 0.1562 | 0.0861 |
+
+**Overall weighted RMSE: 0.0561**
+
+### Interpretation of Parameter Regimes
+
+1. **Strong scaling groups** (hellaswag, arc): These show clear improvement with more FLOPs. The sigmoid captures the rapid improvement at low FLOPs and the plateau at high FLOPs.
+
+2. **Moderate scaling groups** (mmlu, parsinlu_qa_mc): Show weaker but still meaningful improvement trends.
+
+3. **Near-constant groups** (hindu_knowledge, analogical_similarity, conceptual_combinations): These have `b ≈ 0`, meaning the sigmoid collapses to approximately a constant. The brier_score shows little systematic dependence on FLOPs for these benchmarks.
+
+4. **Noisy groups** (arithmetic, abstract_narrative_understanding): High RMSE reflects substantial noise in the data rather than poor model choice. The underlying trend is still captured.
+
+## Notes on Extrapolation
+
+The sigmoid form provides reasonable extrapolation behavior:
+- For `c > 0, b > 0`: As flops → ∞, brier_score → d (saturation)
+- For `c < 0, b > 0`: As flops → ∞, brier_score → a + d (different asymptote)
+- For `b ≈ 0`: brier_score → a + d (constant, regardless of flops)
+
+This prevents the unphysical predictions that pure power laws can produce when extrapolated far beyond the training range.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Evaluation crashed: 'flops'
+Reward written to /logs/verifier/reward.txt: -1.0

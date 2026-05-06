@@ -1,0 +1,129 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import logging
+from typing import Any
+
+from scipy.linalg._matfuncs import recursive_schur_sqrtm
+import scipy.linalg
+
+
+class Solver:
+    """
+    Solver for matrix square root problem.
+    
+    Given a square matrix A, computes its principal matrix square root X 
+    such that X @ X = A, with eigenvalues of X having non-negative real parts.
+    """
+    
+    def __init__(self):
+        """
+        Pre-warm the internal sqrtm function to reduce first-call overhead.
+        """
+        try:
+            warm = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64, order='C')
+            _ = recursive_schur_sqrtm(warm)
+        except Exception:
+            pass
+
+    def solve(self, problem: dict[str, np.ndarray], **kwargs) -> dict[str, dict[str, list[list[complex]]]]:
+        """
+        Computes the principal matrix square root.
+        
+        Args:
+            problem: Dictionary with key "matrix" mapping to a numpy ndarray
+                     of complex or real numbers.
+                     
+        Returns:
+            Dictionary with key "sqrtm" containing a dict with key "X"
+            mapping to a list of lists of complex numbers.
+        """
+        A = problem.get("matrix")
+        if A is None:
+            logging.error("Problem does not contain 'matrix' key.")
+            return {"sqrtm": {"X": []}}
+        
+        # Ensure numpy array with proper dtype
+        if not isinstance(A, np.ndarray):
+            try:
+                A = np.asarray(A, dtype=complex, order='C')
+            except Exception:
+                logging.error("Failed to convert input to numpy complex array.")
+                return {"sqrtm": {"X": []}}
+        else:
+            # Ensure correct dtype and memory layout
+            if A.dtype.char not in 'fdFD':
+                A = np.asarray(A, dtype=complex, order='C')
+            elif A.dtype.char == 'g':
+                A = np.asarray(A, dtype=np.float32, order='C')
+            elif A.dtype.char == 'f':
+                A = np.asarray(A, dtype=np.float64, order='C')
+            else:
+                if not A.flags['C_CONTIGUOUS']:
+                    A = np.ascontiguousarray(A)
+        
+        # Validate shape
+        if A.ndim != 2 or A.shape[0] != A.shape[1]:
+            logging.error(f"Input matrix is not square: {A.shape}")
+            return {"sqrtm": {"X": []}}
+        
+        # Handle empty matrix (0x0)
+        if A.shape[0] == 0:
+            try:
+                X = scipy.linalg.sqrtm(A, disp=True)
+                return {"sqrtm": {"X": X.tolist()}}
+            except Exception:
+                return {"sqrtm": {"X": []}}
+        
+        # Handle 1x1 scalar case
+        if A.shape[0] == 1:
+            sqrt_val = np.sqrt(A[0, 0])
+            # Ensure we return Python complex, not numpy scalar
+            return {"sqrtm": {"X": [[complex(sqrt_val)]]}}
+        
+        try:
+            # Direct call to optimized compiled function
+            result = recursive_schur_sqrtm(A)
+            X = result[0]
+            
+            # Check for internal errors
+            if result[3] < 0 or X is None:
+                logging.error(f"recursive_schur_sqrtm failed with info={result[3]}")
+                return {"sqrtm": {"X": []}}
+        except Exception as e:
+            logging.error(f"Matrix square root computation failed: {e}")
+            return {"sqrtm": {"X": []}}
+        
+        # Convert to list of lists (Python complex objects)
+        X_list = X.tolist()
+        
+        return {"sqrtm": {"X": X_list}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 27.4602s
+Total Solver Time:   11.5528s
+Raw Speedup:         2.3769 x
+Final Reward (Score): 2.3769
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================= 3 passed, 1100 warnings in 567.36s (0:09:27) =================

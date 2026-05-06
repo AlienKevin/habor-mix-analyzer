@@ -1,0 +1,130 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from numba import njit
+from typing import Any
+
+# Inline the RK4 integration with explicit scalar variables for maximum Numba performance.
+# We unroll k1-k4 completely to avoid any array allocation overhead in the inner loop.
+
+
+@njit
+def _rk4_integrate(y0, t0, t1, beta, sigma, gamma, omega, n_steps):
+    """Fixed-step RK4 integration of the SEIRS model, JIT-compiled via Numba."""
+    dt = (t1 - t0) / n_steps
+    dth = 0.5 * dt
+    dt6 = dt / 6.0
+
+    S, E, I, R = y0[0], y0[1], y0[2], y0[3]
+
+    for _ in range(n_steps):
+        # -- k1 --
+        k1_S = -beta * S * I + omega * R
+        k1_E = beta * S * I - sigma * E
+        k1_I = sigma * E - gamma * I
+        k1_R = gamma * I - omega * R
+
+        # -- k2 --
+        S2 = S + dth * k1_S
+        E2 = E + dth * k1_E
+        I2 = I + dth * k1_I
+        R2 = R + dth * k1_R
+
+        k2_S = -beta * S2 * I2 + omega * R2
+        k2_E = beta * S2 * I2 - sigma * E2
+        k2_I = sigma * E2 - gamma * I2
+        k2_R = gamma * I2 - omega * R2
+
+        # -- k3 --
+        S3 = S + dth * k2_S
+        E3 = E + dth * k2_E
+        I3 = I + dth * k2_I
+        R3 = R + dth * k2_R
+
+        k3_S = -beta * S3 * I3 + omega * R3
+        k3_E = beta * S3 * I3 - sigma * E3
+        k3_I = sigma * E3 - gamma * I3
+        k3_R = gamma * I3 - omega * R3
+
+        # -- k4 --
+        S4 = S + dt * k3_S
+        E4 = E + dt * k3_E
+        I4 = I + dt * k3_I
+        R4 = R + dt * k3_R
+
+        k4_S = -beta * S4 * I4 + omega * R4
+        k4_E = beta * S4 * I4 - sigma * E4
+        k4_I = sigma * E4 - gamma * I4
+        k4_R = gamma * I4 - omega * R4
+
+        # -- RK4 update --
+        S += dt6 * (k1_S + 2.0 * k2_S + 2.0 * k3_S + k4_S)
+        E += dt6 * (k1_E + 2.0 * k2_E + 2.0 * k3_E + k4_E)
+        I += dt6 * (k1_I + 2.0 * k2_I + 2.0 * k3_I + k4_I)
+        R += dt6 * (k1_R + 2.0 * k2_R + 2.0 * k3_R + k4_R)
+
+    # Enforce conservation law exactly via renormalization
+    total = S + E + I + R
+    inv_total = 1.0 / total
+    return np.array(
+        [S * inv_total, E * inv_total, I * inv_total, R * inv_total]
+    )
+
+
+class Solver:
+    def __init__(self):
+        # Force Numba JIT compilation during init so it does not count toward
+        # the solve() runtime budget.
+        dummy = np.array([0.25, 0.25, 0.25, 0.25], dtype=np.float64)
+        _rk4_integrate(dummy, 0.0, 1.0, 0.1, 0.1, 0.1, 0.01, 10)
+
+    def solve(self, problem, **kwargs) -> Any:
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
+        beta = float(problem["params"]["beta"])
+        sigma = float(problem["params"]["sigma"])
+        gamma = float(problem["params"]["gamma"])
+        omega = float(problem["params"]["omega"])
+
+        duration = t1 - t0
+
+        # Estimate the dominant rate for step-size selection.
+        max_rate = max(abs(beta), abs(sigma), abs(gamma), abs(omega))
+        if max_rate < 1e-12:
+            max_rate = 1e-12
+
+        # Choose step count: target ~200 steps per characteristic time,
+        # with a floor of 2000 and a ceiling of 500 000.
+        # This keeps the RK4 global truncation error well below 1e-8.
+        n_steps = max(int(duration * max_rate * 200), 2000)
+        if n_steps > 500000:
+            n_steps = 500000
+
+        result = _rk4_integrate(
+            y0, t0, t1, beta, sigma, gamma, omega, n_steps
+        )
+        return result.tolist()
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.6168s
+Total Solver Time:   0.7749s
+Raw Speedup:         9.8299 x
+Final Reward (Score): 9.8299
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 104.47s (0:01:44) =========================

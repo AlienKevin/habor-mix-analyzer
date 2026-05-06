@@ -1,0 +1,163 @@
+---- LAW BEGIN ----
+import math
+
+
+# Fitted parameters for each group: (E, A, alpha)
+# Scaling law: brier_score = E + A * flops^(-alpha)
+GROUP_PARAMS = {
+    "abstract_narrative_understanding": (7.5555711493, -8.0984972692, 0.0100000002),
+    "analogical_similarity": (-0.5390333399, -0.0000034818, 5.0000000000),
+    "arc": (-0.0108879682, -0.0777911048, 0.5885522433),
+    "arithmetic": (-0.1867355566, -0.0019654747, 2.7586036726),
+    "conceptual_combinations": (-0.3883008448, -0.0183384271, 1.1155012666),
+    "hellaswag": (0.0017960655, -0.0521595377, 0.6791209057),
+    "hindu_knowledge": (-1.7479804213, 1.3257929031, 0.0100000000),
+    "mmlu": (-0.6665237354, 0.1868459466, 0.1412375334),
+    "parsinlu_qa_mc": (-0.4240522564, -0.0097890865, 1.3807724059),
+}
+
+# Default parameters for unseen groups (mean of all group predictions at mid-range flops)
+DEFAULT_PARAMS = (-0.4229689931, -0.0000000001, 1.0)
+
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts output variables based on input variables according to a discovered scaling law.
+
+    The scaling law follows a power law with asymptote:
+        brier_score = E + A * flops^(-alpha)
+
+    where E, A, and alpha are group-specific parameters fitted from training data.
+
+    Args:
+        input_data: A list of dictionaries, where each dictionary is a single data
+                    point containing input variable names as keys and their
+                    corresponding values. Expected keys: 'flops' and/or 'log_flops'.
+        group: The name of the experimental group for which to make predictions.
+                The functional form of the law must be the same for all groups,
+                but the constant parameters/coefficients can differ per group.
+
+    Returns:
+        A list of dictionaries, corresponding to the input_data list, with each
+        dictionary containing the predicted output variable(s).
+    """
+    params = GROUP_PARAMS.get(group, DEFAULT_PARAMS)
+    E, A, alpha = params
+
+    results = []
+    for point in input_data:
+        # Extract flops value - try 'flops' first, then derive from 'log_flops'
+        if "flops" in point:
+            flops = point["flops"]
+        elif "log_flops" in point:
+            flops = 10.0 ** point["log_flops"]
+        else:
+            # Fallback: use first numeric value
+            flops = next(v for v in point.values() if isinstance(v, (int, float)))
+
+        # Apply the scaling law: brier_score = E + A * flops^(-alpha)
+        if flops > 0:
+            brier_score = E + A * math.pow(flops, -alpha)
+        else:
+            brier_score = E + A  # flops^0 = 1 when flops approaches 0
+
+        results.append({"brier_score": brier_score})
+
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law Discovery: Brier Score vs. Compute (FLOPs)
+
+## Discovered Mathematical Formula
+
+The scaling law follows a **power law with asymptote**, consistent with the form established in neural scaling law literature (Kaplan et al., 2020; Hoffmann et al., 2022):
+
+$$\text{brier\_score} = E + A \cdot \text{flops}^{-\alpha}$$
+
+Where:
+- **`flops`** is the compute budget (in normalized FLOPs units)
+- **`E`** is the asymptotic brier score as flops → ∞ (the irreducible error floor)
+- **`A`** is the scaling amplitude (how much the score improves from the small-model regime)
+- **`α`** (alpha) is the scaling exponent (rate of improvement with compute)
+
+## Methodology
+
+### 1. Data Exploration
+
+The dataset contains 389 training examples across 9 benchmark groups:
+- `abstract_narrative_understanding` (54 points)
+- `analogical_similarity` (47 points)
+- `arc` (54 points)
+- `arithmetic` (44 points)
+- `conceptual_combinations` (31 points)
+- `hellaswag` (54 points)
+- `hindu_knowledge` (19 points)
+- `mmlu` (32 points)
+- `parsinlu_qa_mc` (54 points)
+
+Each data point has: `flops`, `log_flops` (= log₁₀(flops)), `brier_score`, `model_name`, and `group`.
+
+### 2. Candidate Functional Forms Tested
+
+I evaluated multiple functional forms for their fit quality and extrapolation performance:
+
+| Form | Equation | Avg Extrapolation MSE |
+|------|----------|----------------------|
+| Log-linear | `a·log₁₀(flops) + b` | 0.007743 |
+| Log-quadratic | `a·(log₁₀(flops))² + b·log₁₀(flops) + c` | 0.004603 |
+| Log-cubic | `a·(log₁₀(flops))³ + ...` | 0.020404 |
+| **Power law + asymptote** | **`E + A·flops^(-α)`** | **0.003249** |
+| Exponential decay | `a·exp(-b·flops) + c` | — |
+| Sigmoid power | `a / (1 + b·flops^c)` | — |
+
+### 3. Extrapolation Validation
+
+I used a train/test split (70% lowest flops for training, 30% highest for testing) to evaluate extrapolation performance. The **power law with asymptote** achieved the lowest weighted average test MSE (0.003249), making it the best choice for extrapolation to unseen compute scales.
+
+The log-cubic form, despite having the highest training R² for many groups, performed worst on extrapolation (MSE = 0.020404), confirming that higher-degree polynomials overfit and diverge outside the training range.
+
+### 4. Fitting Procedure
+
+For each group, I performed multi-start optimization using `scipy.optimize.curve_fit` with:
+- 420 different initial parameter combinations (7 × 6 × 10 grid over E₀, A₀, α₀)
+- Parameter bounds: E ∈ [-10, 10], A ∈ [-10, 10], α ∈ [0.01, 5.0]
+- Maximum 20,000 function evaluations per fit
+- Best fit selected by minimum training MSE
+
+## Fitted Parameters per Group
+
+| Group | E | A | α | R² | RMSE |
+|-------|------|------|------|------|------|
+| `abstract_narrative_understanding` | 7.5556 | -8.0985 | 0.0100 | 0.7585 | 0.0862 |
+| `analogical_similarity` | -0.5390 | -0.0000 | 5.0000 | 0.1433 | 0.0469 |
+| `arc` | -0.0109 | -0.0778 | 0.5886 | 0.8336 | 0.0258 |
+| `arithmetic` | -0.1867 | -0.0020 | 2.7586 | 0.6201 | 0.0897 |
+| `conceptual_combinations` | -0.3883 | -0.0183 | 1.1155 | 0.3729 | 0.0602 |
+| `hellaswag` | 0.0018 | -0.0522 | 0.6791 | 0.8822 | 0.0168 |
+| `hindu_knowledge` | -1.7480 | 1.3258 | 0.0100 | 0.1449 | 0.0417 |
+| `mmlu` | -0.6665 | 0.1868 | 0.1412 | 0.5552 | 0.0338 |
+| `parsinlu_qa_mc` | -0.4241 | -0.0098 | 1.3808 | 0.2678 | 0.0544 |
+
+**Overall pooled R²: 0.6501**
+
+### Parameter Interpretation
+
+- **Well-fitting groups** (R² > 0.75): `hellaswag`, `arc`, `abstract_narrative_understanding` show clear power-law scaling with moderate exponents (α ≈ 0.01–0.68).
+
+- **Moderate groups** (0.25 < R² < 0.65): `arithmetic`, `mmlu`, `conceptual_combinations`, `parsinlu_qa_mc` show scaling trends with higher noise.
+
+- **Flat groups** (R² < 0.15): `analogical_similarity` and `hindu_knowledge` show minimal scaling with compute. Their parameters converge to boundary values:
+  - `analogical_similarity`: A ≈ 0, meaning the score is essentially constant (E ≈ -0.539)
+  - `hindu_knowledge`: α → 0.01, where the power law approximates a log-linear relationship
+
+### Note on Degenerate Regimes
+
+When α → 0, the power law form naturally approximates a log-linear relationship:
+
+$$E + A \cdot \text{flops}^{-\epsilon} \approx E + A \cdot (1 - \epsilon \ln(\text{flops})) = (E + A) - A\epsilon \cdot \ln(\text{flops})$$
+
+This means the same functional form flexibly captures both power-law scaling (for groups with clear scaling trends) and log-linear scaling (for groups where the relationship is approximately linear in log-space), without requiring different forms for different groups.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: easy_question_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.0323763959855089

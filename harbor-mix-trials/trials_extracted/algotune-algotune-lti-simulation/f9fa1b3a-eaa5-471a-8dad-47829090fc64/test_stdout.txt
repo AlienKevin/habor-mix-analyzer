@@ -1,0 +1,177 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy import signal
+from scipy.linalg import expm
+import numba
+
+@numba.njit(cache=True, fastmath=True)
+def _sim1(Ad, Bd0, Bd1, Cf, u, Dv):
+    ns = len(u)
+    a0 = Ad[0,0]; b00 = Bd0[0]; b10 = Bd1[0]; c0 = Cf[0]
+    x0 = 0.0
+    y = np.empty(ns)
+    y[0] = Dv * u[0]
+    for i in range(1, ns):
+        x0 = a0*x0 + b00*u[i-1] + b10*u[i]
+        y[i] = c0*x0 + Dv*u[i]
+    return y
+
+@numba.njit(cache=True, fastmath=True)
+def _sim2(Ad, Bd0, Bd1, Cf, u, Dv):
+    ns = len(u)
+    a00=Ad[0,0]; a01=Ad[0,1]; a10=Ad[1,0]; a11=Ad[1,1]
+    b00=Bd0[0]; b01=Bd0[1]; b10=Bd1[0]; b11=Bd1[1]
+    c0=Cf[0]; c1=Cf[1]
+    x0=0.0; x1=0.0
+    y = np.empty(ns)
+    y[0] = Dv * u[0]
+    for i in range(1, ns):
+        xn0 = a00*x0 + a01*x1 + b00*u[i-1] + b10*u[i]
+        xn1 = a10*x0 + a11*x1 + b01*u[i-1] + b11*u[i]
+        x0=xn0; x1=xn1
+        y[i] = c0*x0 + c1*x1 + Dv*u[i]
+    return y
+
+@numba.njit(cache=True, fastmath=True)
+def _sim3(Ad, Bd0, Bd1, Cf, u, Dv):
+    ns = len(u)
+    x0=0.0; x1=0.0; x2=0.0
+    y = np.empty(ns)
+    y[0] = Dv * u[0]
+    for i in range(1, ns):
+        xn0=Ad[0,0]*x0+Ad[0,1]*x1+Ad[0,2]*x2+Bd0[0]*u[i-1]+Bd1[0]*u[i]
+        xn1=Ad[1,0]*x0+Ad[1,1]*x1+Ad[1,2]*x2+Bd0[1]*u[i-1]+Bd1[1]*u[i]
+        xn2=Ad[2,0]*x0+Ad[2,1]*x1+Ad[2,2]*x2+Bd0[2]*u[i-1]+Bd1[2]*u[i]
+        x0=xn0; x1=xn1; x2=xn2
+        y[i]=Cf[0]*x0+Cf[1]*x1+Cf[2]*x2+Dv*u[i]
+    return y
+
+@numba.njit(cache=True, fastmath=True)
+def _sim4(Ad, Bd0, Bd1, Cf, u, Dv):
+    ns = len(u)
+    x0=0.0;x1=0.0;x2=0.0;x3=0.0
+    y = np.empty(ns)
+    y[0] = Dv * u[0]
+    for i in range(1, ns):
+        xn0=Ad[0,0]*x0+Ad[0,1]*x1+Ad[0,2]*x2+Ad[0,3]*x3+Bd0[0]*u[i-1]+Bd1[0]*u[i]
+        xn1=Ad[1,0]*x0+Ad[1,1]*x1+Ad[1,2]*x2+Ad[1,3]*x3+Bd0[1]*u[i-1]+Bd1[1]*u[i]
+        xn2=Ad[2,0]*x0+Ad[2,1]*x1+Ad[2,2]*x2+Ad[2,3]*x3+Bd0[2]*u[i-1]+Bd1[2]*u[i]
+        xn3=Ad[3,0]*x0+Ad[3,1]*x1+Ad[3,2]*x2+Ad[3,3]*x3+Bd0[3]*u[i-1]+Bd1[3]*u[i]
+        x0=xn0;x1=xn1;x2=xn2;x3=xn3
+        y[i]=Cf[0]*x0+Cf[1]*x1+Cf[2]*x2+Cf[3]*x3+Dv*u[i]
+    return y
+
+@numba.njit(cache=True, fastmath=True)
+def _sim5(Ad, Bd0, Bd1, Cf, u, Dv):
+    ns = len(u)
+    x0=0.0;x1=0.0;x2=0.0;x3=0.0;x4=0.0
+    y = np.empty(ns)
+    y[0] = Dv * u[0]
+    for i in range(1, ns):
+        xn0=Ad[0,0]*x0+Ad[0,1]*x1+Ad[0,2]*x2+Ad[0,3]*x3+Ad[0,4]*x4+Bd0[0]*u[i-1]+Bd1[0]*u[i]
+        xn1=Ad[1,0]*x0+Ad[1,1]*x1+Ad[1,2]*x2+Ad[1,3]*x3+Ad[1,4]*x4+Bd0[1]*u[i-1]+Bd1[1]*u[i]
+        xn2=Ad[2,0]*x0+Ad[2,1]*x1+Ad[2,2]*x2+Ad[2,3]*x3+Ad[2,4]*x4+Bd0[2]*u[i-1]+Bd1[2]*u[i]
+        xn3=Ad[3,0]*x0+Ad[3,1]*x1+Ad[3,2]*x2+Ad[3,3]*x3+Ad[3,4]*x4+Bd0[3]*u[i-1]+Bd1[3]*u[i]
+        xn4=Ad[4,0]*x0+Ad[4,1]*x1+Ad[4,2]*x2+Ad[4,3]*x3+Ad[4,4]*x4+Bd0[4]*u[i-1]+Bd1[4]*u[i]
+        x0=xn0;x1=xn1;x2=xn2;x3=xn3;x4=xn4
+        y[i]=Cf[0]*x0+Cf[1]*x1+Cf[2]*x2+Cf[3]*x3+Cf[4]*x4+Dv*u[i]
+    return y
+
+@numba.njit(cache=True, fastmath=True)
+def _sim_gen(Ad, Bd0, Bd1, Cf, u, Dv):
+    ns = len(u)
+    nx = Ad.shape[0]
+    x = np.zeros(nx)
+    y = np.empty(ns)
+    y[0] = Dv * u[0]
+    for i in range(1, ns):
+        x = Ad @ x + Bd0 * u[i-1] + Bd1 * u[i]
+        y[i] = Cf @ x + Dv * u[i]
+    return y
+
+class Solver:
+    def solve(self, problem, **kwargs):
+        num = np.asarray(problem["num"], dtype=np.float64)
+        den = np.asarray(problem["den"], dtype=np.float64)
+        u = np.asarray(problem["u"], dtype=np.float64)
+        t = np.asarray(problem["t"], dtype=np.float64)
+        ns = len(t)
+        A, B, C, D = signal.tf2ss(num, den)
+        A = np.ascontiguousarray(A, dtype=np.float64)
+        B = np.ascontiguousarray(B, dtype=np.float64)
+        C = np.ascontiguousarray(C, dtype=np.float64)
+        D = np.ascontiguousarray(D, dtype=np.float64)
+        nx = A.shape[0]
+        Dv = float(D.ravel()[0]) if D.size > 0 else 0.0
+        if nx == 0:
+            return {"yout": (Dv * u).tolist()}
+        if ns <= 1:
+            return {"yout": [Dv * u[0]] if ns == 1 else []}
+        dt = t[1] - t[0]
+        M = np.zeros((nx+2, nx+2))
+        M[:nx, :nx] = A * dt
+        M[:nx, nx] = (B * dt).ravel()
+        M[nx, nx+1] = 1.0
+        eT = expm(M.T)
+        Ad = np.ascontiguousarray(eT[:nx, :nx].T)
+        Bd1 = np.ascontiguousarray(eT[nx+1, :nx].T)
+        Bd0 = np.ascontiguousarray((eT[nx, :nx] - eT[nx+1, :nx]).T)
+        Cf = np.ascontiguousarray(C.ravel())
+        if nx == 1: yout = _sim1(Ad, Bd0, Bd1, Cf, u, Dv)
+        elif nx == 2: yout = _sim2(Ad, Bd0, Bd1, Cf, u, Dv)
+        elif nx == 3: yout = _sim3(Ad, Bd0, Bd1, Cf, u, Dv)
+        elif nx == 4: yout = _sim4(Ad, Bd0, Bd1, Cf, u, Dv)
+        elif nx == 5: yout = _sim5(Ad, Bd0, Bd1, Cf, u, Dv)
+        else: yout = _sim_gen(Ad, Bd0, Bd1, Cf, u, Dv)
+        return {"yout": yout.tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: False
+Total Baseline Time: 0.0000s
+Total Solver Time:   0.0000s
+Raw Speedup:         0.0000 x
+Final Reward (Score): 1.0000
+---------------------------
+FF
+
+=================================== FAILURES ===================================
+_____________________________ test_solver_validity _____________________________
+
+performance_results = {'raw_speedup': 0.0, 'speedup': 1.0, 'validity': False}
+
+    def test_solver_validity(performance_results):
+        """Ensures the solver produces valid outputs."""
+        if not performance_results["validity"]:
+>           pytest.fail("Solver produced invalid solutions on the test set.")
+E           Failed: Solver produced invalid solutions on the test set.
+
+/tests/test_outputs.py:193: Failed
+------------------------------ Captured log setup ------------------------------
+ERROR    test_outputs:test_outputs.py:93 Solver raised exception during warmup: No module named 'solver'
+WARNING  test_outputs:test_outputs.py:165 Invalid solution detected. Assigning mercy score of 1.0.
+_____________________________ test_solver_speedup ______________________________
+
+performance_results = {'raw_speedup': 0.0, 'speedup': 1.0, 'validity': False}
+
+    def test_solver_speedup(performance_results):
+        """Checks if the solver effectively optimized the code."""
+>       assert performance_results["raw_speedup"] > 1.0, \
+            f"Solver was not faster than baseline (Speedup: {performance_results['raw_speedup']:.2f}x)"
+E       AssertionError: Solver was not faster than baseline (Speedup: 0.00x)
+E       assert 0.0 > 1.0
+
+/tests/test_outputs.py:198: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+FAILED ../tests/test_outputs.py::test_solver_validity - Failed: Solver produc...
+FAILED ../tests/test_outputs.py::test_solver_speedup - AssertionError: Solver...
+========================= 2 failed, 1 passed in 1.15s ==========================

@@ -1,0 +1,333 @@
+--- Final Solver (used for performance test) ---
+from typing import Any
+import math
+
+try:
+    import numba as nb
+except Exception:  # pragma: no cover
+    nb = None
+
+
+if nb is not None:
+    @nb.njit(cache=True, fastmath=True)
+    def _seirs_rk45(t0, t1, s0, e0, i0, beta, sigma, gamma, omega, rtol, atol):
+        # Dormand-Prince 5(4), adaptive, integrating S,E,I only; R=1-S-E-I.
+        dt_total = t1 - t0
+        if dt_total == 0.0:
+            return s0, e0, i0
+        direction = 1.0
+        if dt_total < 0.0:
+            direction = -1.0
+            dt_total = -dt_total
+        t = 0.0
+        s = s0
+        e = e0
+        ii = i0
+
+        # Initial step: conservative but not too small.
+        max_rate = abs(beta) + abs(sigma) + abs(gamma) + abs(omega)
+        if max_rate <= 1e-14:
+            return s, e, ii
+        h = min(dt_total, max(1e-6, 0.05 / max_rate)) * direction
+        tend = (t1 - t0)
+
+        # Safety limits to avoid pathological infinite loops.
+        nsteps = 0
+        max_steps = 2000000
+
+        while (t - tend) * direction < -1e-15 and nsteps < max_steps:
+            nsteps += 1
+            if (t + h - tend) * direction > 0.0:
+                h = tend - t
+
+            # k1
+            r = 1.0 - s - e - ii
+            k1s = -beta * s * ii + omega * r
+            k1e = beta * s * ii - sigma * e
+            k1i = sigma * e - gamma * ii
+
+            # k2, a21=1/5
+            hs = h * 0.2
+            ss = s + hs * k1s
+            ee = e + hs * k1e
+            jj = ii + hs * k1i
+            r = 1.0 - ss - ee - jj
+            k2s = -beta * ss * jj + omega * r
+            k2e = beta * ss * jj - sigma * ee
+            k2i = sigma * ee - gamma * jj
+
+            # k3: 3/40, 9/40
+            ss = s + h * (0.075 * k1s + 0.225 * k2s)
+            ee = e + h * (0.075 * k1e + 0.225 * k2e)
+            jj = ii + h * (0.075 * k1i + 0.225 * k2i)
+            r = 1.0 - ss - ee - jj
+            k3s = -beta * ss * jj + omega * r
+            k3e = beta * ss * jj - sigma * ee
+            k3i = sigma * ee - gamma * jj
+
+            # k4: 44/45, -56/15, 32/9
+            ss = s + h * ((44.0/45.0)*k1s + (-56.0/15.0)*k2s + (32.0/9.0)*k3s)
+            ee = e + h * ((44.0/45.0)*k1e + (-56.0/15.0)*k2e + (32.0/9.0)*k3e)
+            jj = ii + h * ((44.0/45.0)*k1i + (-56.0/15.0)*k2i + (32.0/9.0)*k3i)
+            r = 1.0 - ss - ee - jj
+            k4s = -beta * ss * jj + omega * r
+            k4e = beta * ss * jj - sigma * ee
+            k4i = sigma * ee - gamma * jj
+
+            # k5: 19372/6561, -25360/2187, 64448/6561, -212/729
+            ss = s + h * ((19372.0/6561.0)*k1s + (-25360.0/2187.0)*k2s + (64448.0/6561.0)*k3s + (-212.0/729.0)*k4s)
+            ee = e + h * ((19372.0/6561.0)*k1e + (-25360.0/2187.0)*k2e + (64448.0/6561.0)*k3e + (-212.0/729.0)*k4e)
+            jj = ii + h * ((19372.0/6561.0)*k1i + (-25360.0/2187.0)*k2i + (64448.0/6561.0)*k3i + (-212.0/729.0)*k4i)
+            r = 1.0 - ss - ee - jj
+            k5s = -beta * ss * jj + omega * r
+            k5e = beta * ss * jj - sigma * ee
+            k5i = sigma * ee - gamma * jj
+
+            # k6: 9017/3168, -355/33, 46732/5247, 49/176, -5103/18656
+            ss = s + h * ((9017.0/3168.0)*k1s + (-355.0/33.0)*k2s + (46732.0/5247.0)*k3s + (49.0/176.0)*k4s + (-5103.0/18656.0)*k5s)
+            ee = e + h * ((9017.0/3168.0)*k1e + (-355.0/33.0)*k2e + (46732.0/5247.0)*k3e + (49.0/176.0)*k4e + (-5103.0/18656.0)*k5e)
+            jj = ii + h * ((9017.0/3168.0)*k1i + (-355.0/33.0)*k2i + (46732.0/5247.0)*k3i + (49.0/176.0)*k4i + (-5103.0/18656.0)*k5i)
+            r = 1.0 - ss - ee - jj
+            k6s = -beta * ss * jj + omega * r
+            k6e = beta * ss * jj - sigma * ee
+            k6i = sigma * ee - gamma * jj
+
+            # 5th order solution (also k7 point): 35/384, 0, 500/1113, 125/192, -2187/6784, 11/84
+            s5 = s + h * ((35.0/384.0)*k1s + (500.0/1113.0)*k3s + (125.0/192.0)*k4s + (-2187.0/6784.0)*k5s + (11.0/84.0)*k6s)
+            e5 = e + h * ((35.0/384.0)*k1e + (500.0/1113.0)*k3e + (125.0/192.0)*k4e + (-2187.0/6784.0)*k5e + (11.0/84.0)*k6e)
+            i5 = ii + h * ((35.0/384.0)*k1i + (500.0/1113.0)*k3i + (125.0/192.0)*k4i + (-2187.0/6784.0)*k5i + (11.0/84.0)*k6i)
+
+            r = 1.0 - s5 - e5 - i5
+            k7s = -beta * s5 * i5 + omega * r
+            k7e = beta * s5 * i5 - sigma * e5
+            k7i = sigma * e5 - gamma * i5
+
+            # 4th order embedded: 5179/57600, 0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40
+            s4 = s + h * ((5179.0/57600.0)*k1s + (7571.0/16695.0)*k3s + (393.0/640.0)*k4s + (-92097.0/339200.0)*k5s + (187.0/2100.0)*k6s + 0.025*k7s)
+            e4 = e + h * ((5179.0/57600.0)*k1e + (7571.0/16695.0)*k3e + (393.0/640.0)*k4e + (-92097.0/339200.0)*k5e + (187.0/2100.0)*k6e + 0.025*k7e)
+            i4 = ii + h * ((5179.0/57600.0)*k1i + (7571.0/16695.0)*k3i + (393.0/640.0)*k4i + (-92097.0/339200.0)*k5i + (187.0/2100.0)*k6i + 0.025*k7i)
+
+            # infinity norm scaled error, include reconstructed R error too.
+            es = abs(s5 - s4) / (atol + rtol * max(abs(s), abs(s5)))
+            ee2 = abs(e5 - e4) / (atol + rtol * max(abs(e), abs(e5)))
+            ei = abs(i5 - i4) / (atol + rtol * max(abs(ii), abs(i5)))
+            er = abs((s5+e5+i5) - (s4+e4+i4)) / (atol + rtol * max(abs(1.0-s-e-ii), abs(1.0-s5-e5-i5)))
+            err = max(max(es, ee2), max(ei, er))
+
+            if err <= 1.0 or abs(h) <= 1e-14 * max(1.0, abs(t)):
+                t += h
+                s = s5
+                e = e5
+                ii = i5
+                # Remove tiny roundoff excursions; not an accuracy-affecting projection in normal cases.
+                if s < 0.0 and s > -1e-12:
+                    s = 0.0
+                if e < 0.0 and e > -1e-12:
+                    e = 0.0
+                if ii < 0.0 and ii > -1e-12:
+                    ii = 0.0
+
+            # Step update.
+            if err == 0.0:
+                fac = 5.0
+            else:
+                fac = 0.9 * err ** (-0.2)
+                if fac < 0.2:
+                    fac = 0.2
+                elif fac > 5.0:
+                    fac = 5.0
+            h *= fac
+
+        return s, e, ii
+
+else:
+    _seirs_rk45 = None
+
+
+class Solver:
+    def __init__(self):
+        # Trigger JIT compilation here; benchmark states init compilation time is not counted.
+        if _seirs_rk45 is not None:
+            _seirs_rk45(0.0, 1e-6, 0.99, 0.005, 0.005, 0.3, 0.2, 0.1, 0.01, 1e-8, 1e-10)
+
+    def solve(self, problem, **kwargs) -> Any:
+        p = problem["params"]
+        beta = float(p["beta"])
+        sigma = float(p["sigma"])
+        gamma = float(p["gamma"])
+        omega = float(p["omega"])
+        y0 = problem["y0"]
+        s0 = float(y0[0]); e0 = float(y0[1]); i0 = float(y0[2]); r0 = float(y0[3])
+        t0 = float(problem["t0"]); t1 = float(problem["t1"])
+
+        if t1 == t0:
+            tot = s0 + e0 + i0 + r0
+            if tot != 0.0:
+                return [s0/tot, e0/tot, i0/tot, r0/tot]
+            return [s0, e0, i0, r0]
+
+        # If no exposed/infectious people, equations reduce to linear R -> S flow.
+        if abs(e0) < 1e-15 and abs(i0) < 1e-15:
+            dt = t1 - t0
+            if omega == 0.0:
+                s = s0; e = 0.0; i = 0.0; r = r0
+            else:
+                decay = math.exp(-omega * dt)
+                r = r0 * decay
+                s = 1.0 - r
+                e = 0.0; i = 0.0
+            return [float(s), float(e), float(i), float(r)]
+
+        if _seirs_rk45 is not None:
+            s, e, i = _seirs_rk45(t0, t1, s0, e0, i0, beta, sigma, gamma, omega, 2e-8, 2e-10)
+        else:  # Fallback, rarely used.
+            from scipy.integrate import solve_ivp
+            def rhs(t, y):
+                s, e, i = y
+                r = 1.0 - s - e - i
+                return [-beta*s*i + omega*r, beta*s*i - sigma*e, sigma*e - gamma*i]
+            sol = solve_ivp(rhs, (t0, t1), [s0, e0, i0], method="DOP853", rtol=1e-8, atol=1e-10)
+            s, e, i = sol.y[:, -1]
+
+        r = 1.0 - s - e - i
+        # Clamp only minuscule numerical negativity, then renormalize to satisfy conservation exactly.
+        vals = [float(s), float(e), float(i), float(r)]
+        for k in range(4):
+            if vals[k] < 0.0 and vals[k] > -1e-10:
+                vals[k] = 0.0
+        total = vals[0] + vals[1] + vals[2] + vals[3]
+        if total != 0.0 and abs(total - 1.0) > 1e-15:
+            inv = 1.0 / total
+            vals = [v * inv for v in vals]
+        else:
+            vals[3] = 1.0 - vals[0] - vals[1] - vals[2]
+        return vals
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:150: in __init__
+    _seirs_rk45(0.0, 1e-6, 0.99, 0.005, 0.005, 0.3, 0.2, 0.1, 0.01, 1e-8, 1e-10)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x711c7d41c0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:150: in __init__
+    _seirs_rk45(0.0, 1e-6, 0.99, 0.005, 0.005, 0.3, 0.2, 0.1, 0.01, 1e-8, 1e-10)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x711c7d41c0e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 0.71s ==========================

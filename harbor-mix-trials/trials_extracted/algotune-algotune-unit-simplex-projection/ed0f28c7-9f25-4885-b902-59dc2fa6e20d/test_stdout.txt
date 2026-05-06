@@ -1,0 +1,70 @@
+--- Final Solver (used for performance test) ---
+from __future__ import annotations
+
+from typing import Any
+import numpy as np
+
+
+class Solver:
+    def solve(self, problem: dict[str, Any], **kwargs) -> dict[str, Any]:
+        """Euclidean projection of y onto the probability simplex."""
+        y = np.asarray(problem.get("y"), dtype=np.float64).ravel()
+        n = y.size
+
+        if n == 0:
+            return {"solution": y.copy()}
+        if n == 1:
+            return {"solution": np.array([1.0], dtype=np.float64)}
+
+        # Very common cheap case: y is already on the simplex.
+        # Tolerance is much tighter than validator tolerance and avoids unnecessary sort.
+        s = y.sum()
+        if s >= 0.999999999999 and s <= 1.000000000001 and np.all(y >= 0.0):
+            return {"solution": y.copy()}
+
+        # Closed form for n=2: x1 = clip((y1-y2+1)/2, 0, 1), x2 = 1-x1.
+        if n == 2:
+            x0 = 0.5 * (y[0] - y[1] + 1.0)
+            if x0 <= 0.0:
+                return {"solution": np.array([0.0, 1.0], dtype=np.float64)}
+            if x0 >= 1.0:
+                return {"solution": np.array([1.0, 0.0], dtype=np.float64)}
+            return {"solution": np.array([x0, 1.0 - x0], dtype=np.float64)}
+
+        # Sort in descending order and find threshold theta.
+        u = np.sort(y)[::-1]
+        cssv = np.cumsum(u)
+        idx = np.arange(1, n + 1, dtype=np.float64)
+        cond = u > (cssv - 1.0) / idx
+
+        # At least the first element always satisfies the condition for finite y.
+        rho = np.nonzero(cond)[0][-1]
+        theta = (cssv[rho] - 1.0) / float(rho + 1)
+
+        x = y - theta
+        np.maximum(x, 0.0, out=x)
+        return {"solution": x}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 6.4668s
+Total Solver Time:   6.2730s
+Raw Speedup:         1.0309 x
+Final Reward (Score): 1.0309
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 154.43s (0:02:34) =========================

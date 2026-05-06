@@ -1,0 +1,156 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy import linalg
+from typing import Any
+
+def tf2ss(b, a):
+    """Convert transfer function to state-space (matching scipy convention)."""
+    b = np.array(b, dtype=np.float64) / a[0]
+    a = np.array(a, dtype=np.float64) / a[0]
+    
+    n = len(a) - 1
+    m = len(b) - 1
+    
+    if n == 0:
+        return np.zeros((0, 0)), np.zeros(0), np.zeros(0), np.array([b[0]])
+    
+    # A matrix (companion form, scipy convention)
+    A = np.zeros((n, n), dtype=np.float64)
+    A[0, :] = -a[1:]  # First row: negative coeffs (ascending order)
+    if n > 1:
+        A[1:, :-1] = np.eye(n-1, dtype=np.float64)  # Sub-diagonal ones
+    
+    # B matrix
+    B = np.zeros(n, dtype=np.float64)
+    B[0] = 1.0
+    
+    # C and D from polynomial division
+    if m < n:
+        # Strictly proper
+        D = np.zeros(1, dtype=np.float64)
+        C = np.zeros(n, dtype=np.float64)
+        C[n - m - 1:n] = b
+    elif m == n:
+        if np.allclose(b[0], 0.0):
+            D = np.zeros(1, dtype=np.float64)
+            C = np.zeros(n, dtype=np.float64)
+            C[n - len(b):] = b
+        else:
+            D = np.array([b[0]], dtype=np.float64)
+            C = np.zeros(n, dtype=np.float64)
+            for j in range(1, n+1):
+                C[j-1] = b[j] - b[0] * a[j]
+    else:
+        # Improper: num order > den order
+        q, r = np.polydiv(b, a)
+        D = q.astype(np.float64)
+        C = np.zeros(n, dtype=np.float64)
+        if len(r) > 0:
+            C[n - len(r):n] = r
+    
+    return A, B, C, D
+
+
+class Solver:
+    def solve(self, problem, **kwargs) -> Any:
+        num = problem["num"]
+        den = problem["den"]
+        u = problem["u"]
+        t = problem["t"]
+        
+        num_arr = np.array(num, dtype=np.float64)
+        den_arr = np.array(den, dtype=np.float64)
+        u_arr = np.array(u, dtype=np.float64)
+        t_arr = np.array(t, dtype=np.float64)
+        
+        A, B, C, D = tf2ss(num_arr, den_arr)
+        
+        # Handle static gain case
+        if A.shape[0] == 0:
+            yout = D[0] * u_arr
+            return {"yout": yout.tolist()}
+        
+        nt = len(t_arr)
+        n = len(A)
+        
+        # Check if time steps are equally spaced
+        dt = t_arr[1] - t_arr[0] if nt > 1 else 0
+        equal_spacing = nt <= 1 or np.allclose(np.diff(t_arr), dt)
+        
+        yout = np.zeros(nt, dtype=np.float64)
+        x = np.zeros(n, dtype=np.float64)
+        
+        yout[0] = D[0] * u_arr[0]
+        
+        if equal_spacing and nt > 1:
+            # Precompute for equal spacing
+            expAdt = linalg.expm(A * dt)
+            A_inv = linalg.inv(A)
+            A_inv2 = A_inv @ A_inv
+            eye_n = np.eye(n, dtype=np.float64)
+            
+            term_zoh = A_inv @ (expAdt - eye_n) @ B
+            term_foh = A_inv2 @ (expAdt - eye_n - A * dt) @ B
+            
+            for i in range(1, nt):
+                du = (u_arr[i] - u_arr[i-1]) / dt
+                x = expAdt @ x + term_zoh * u_arr[i-1] + term_foh * du
+                yout[i] = C @ x + D[0] * u_arr[i]
+        else:
+            # Non-uniform spacing
+            A_inv = linalg.inv(A)
+            A_inv2 = A_inv @ A_inv
+            eye_n = np.eye(n, dtype=np.float64)
+            
+            for i in range(1, nt):
+                dt_i = t_arr[i] - t_arr[i-1]
+                if dt_i <= 0:
+                    yout[i] = yout[i-1]
+                    continue
+                
+                expAdt = linalg.expm(A * dt_i)
+                term_zoh = A_inv @ (expAdt - eye_n) @ B
+                du = (u_arr[i] - u_arr[i-1]) / dt_i
+                term_foh = A_inv2 @ (expAdt - eye_n - A * dt_i) @ B
+                
+                x = expAdt @ x + term_zoh * u_arr[i-1] + term_foh * du
+                yout[i] = C @ x + D[0] * u_arr[i]
+        
+        return {"yout": yout.tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 9.0753s
+Total Solver Time:   9.5542s
+Raw Speedup:         0.9499 x
+Final Reward (Score): 1.0000
+---------------------------
+.F
+
+=================================== FAILURES ===================================
+_____________________________ test_solver_speedup ______________________________
+
+performance_results = {'raw_speedup': 0.9498773763439924, 'speedup': 1.0, 'validity': True}
+
+    def test_solver_speedup(performance_results):
+        """Checks if the solver effectively optimized the code."""
+>       assert performance_results["raw_speedup"] > 1.0, \
+            f"Solver was not faster than baseline (Speedup: {performance_results['raw_speedup']:.2f}x)"
+E       AssertionError: Solver was not faster than baseline (Speedup: 0.95x)
+E       assert 0.9498773763439924 > 1.0
+
+/tests/test_outputs.py:198: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+FAILED ../tests/test_outputs.py::test_solver_speedup - AssertionError: Solver...
+=================== 1 failed, 2 passed in 221.62s (0:03:41) ====================

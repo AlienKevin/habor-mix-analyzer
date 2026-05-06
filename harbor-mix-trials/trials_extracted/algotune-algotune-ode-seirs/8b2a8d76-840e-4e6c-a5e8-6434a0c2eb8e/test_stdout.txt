@@ -1,0 +1,203 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from numba import njit
+from typing import Any
+
+
+@njit
+def seirs_rhs(t, y, beta, sigma, gamma, omega):
+    """Compute the right-hand side of the SEIRS model."""
+    S, E, I, R = y[0], y[1], y[2], y[3]
+    SI = S * I
+    dS = -beta * SI + omega * R
+    dE = beta * SI - sigma * E
+    dI = sigma * E - gamma * I
+    dR = gamma * I - omega * R
+    return np.array([dS, dE, dI, dR])
+
+
+@njit
+def rk45_step(t, y, h, beta, sigma, gamma, omega):
+    """
+    Dormand-Prince RK45 single step.
+    Returns (y_new, y_err, num_evals).
+    """
+    # Dormand-Prince coefficients
+    c2, c3, c4, c5, c6 = 1/5, 3/10, 4/5, 8/9, 1.0
+
+    a21 = 1/5
+    a31, a32 = 3/40, 9/40
+    a41, a42, a43 = 44/45, -56/15, 32/9
+    a51, a52, a53, a54 = 19372/6561, -25360/2187, 64448/6561, -212/729
+    a61, a62, a63, a64, a65 = 9017/3168, -355/33, 46732/5247, 49/176, -5103/18656
+    a71, a72, a73, a74, a75, a76 = (35/384, 0, 500/1113, 125/192,
+                                      -2187/6784, 11/84)
+
+    # Error coefficients (5th order - 4th order)
+    e1 = 35/384 - 5179/57600
+    e3 = 500/1113 - 7571/16695
+    e4 = 125/192 - 393/640
+    e5 = -2187/6784 + 92097/339200
+    e6 = 11/84 - 187/2100
+    e7 = -1/40
+
+    k1 = seirs_rhs(t, y, beta, sigma, gamma, omega)
+    k2 = seirs_rhs(t + c2*h, y + h*(a21*k1), beta, sigma, gamma, omega)
+    k3 = seirs_rhs(t + c3*h, y + h*(a31*k1 + a32*k2), beta, sigma, gamma, omega)
+    k4 = seirs_rhs(t + c4*h, y + h*(a41*k1 + a42*k2 + a43*k3), beta, sigma, gamma, omega)
+    k5 = seirs_rhs(t + c5*h, y + h*(a51*k1 + a52*k2 + a53*k3 + a54*k4), beta, sigma, gamma, omega)
+    k6 = seirs_rhs(t + h, y + h*(a61*k1 + a62*k2 + a63*k3 + a64*k4 + a65*k5), beta, sigma, gamma, omega)
+
+    # 5th order solution
+    y_new = y + h*(a71*k1 + a73*k3 + a74*k4 + a75*k5 + a76*k6)
+
+    # 7th stage for error estimation
+    k7 = seirs_rhs(t + h, y_new, beta, sigma, gamma, omega)
+
+    # Error estimate
+    err = h*(e1*k1 + e3*k3 + e4*k4 + e5*k5 + e6*k6 + e7*k7)
+
+    return y_new, err
+
+
+@njit
+def solve_seirs_numba(t0, t1, y0_arr, beta, sigma, gamma, omega, rtol, atol):
+    """
+    Adaptive RK45 integrator for SEIRS model, fully JIT-compiled.
+    """
+    y = y0_arr.copy()
+    t = t0
+    direction = 1.0 if t1 > t0 else -1.0
+    t_end = t1
+
+    # Initial step size estimation
+    f0 = seirs_rhs(t, y, beta, sigma, gamma, omega)
+    max_f0 = np.max(np.abs(f0))
+    max_y0 = np.max(np.abs(y))
+    if max_f0 > 0:
+        h = 0.01 * (max_y0 + atol) / max_f0
+    else:
+        h = 0.01
+    h = min(h, abs(t_end - t))
+    h = max(h, 1e-15)
+    h *= direction
+
+    # Safety factors for step size control
+    safety = 0.9
+    min_factor = 0.2
+    max_factor = 5.0
+    max_steps = 10_000_000
+
+    step_count = 0
+    while step_count < max_steps:
+        if direction > 0 and t >= t_end - 1e-14:
+            break
+        if direction < 0 and t <= t_end + 1e-14:
+            break
+
+        # Don't overshoot
+        if direction > 0 and t + h > t_end:
+            h = t_end - t
+        if direction < 0 and t + h < t_end:
+            h = t_end - t
+
+        y_new, err = rk45_step(t, y, h, beta, sigma, gamma, omega)
+
+        # Compute error norm
+        scale = atol + rtol * np.maximum(np.abs(y), np.abs(y_new))
+        err_norm = np.sqrt(np.mean((err / scale) ** 2))
+
+        if err_norm <= 1.0:
+            # Accept step
+            t = t + h
+            y = y_new
+
+            # Adjust step size
+            if err_norm > 0:
+                factor = safety * (1.0 / err_norm) ** 0.2
+            else:
+                factor = max_factor
+            factor = min(max_factor, max(min_factor, factor))
+            h = h * factor
+
+        else:
+            # Reject step, reduce step size
+            if err_norm > 0:
+                factor = safety * (1.0 / err_norm) ** 0.25
+            else:
+                factor = min_factor
+            factor = max(min_factor, factor)
+            h = h * factor
+
+        step_count += 1
+
+    # Enforce conservation law: S + E + I + R = 1
+    total = y[0] + y[1] + y[2] + y[3]
+    if total > 0:
+        y = y / total
+
+    # Clamp to [0, 1]
+    for i in range(4):
+        if y[i] < 0:
+            y[i] = 0.0
+        if y[i] > 1:
+            y[i] = 1.0
+
+    # Re-normalize after clamping
+    total = y[0] + y[1] + y[2] + y[3]
+    if total > 0:
+        y = y / total
+
+    return y
+
+
+class Solver:
+    def __init__(self):
+        # Warm up numba JIT compilation
+        self._warmup()
+
+    def _warmup(self):
+        """Pre-compile numba functions with a dummy call."""
+        y0 = np.array([0.9, 0.05, 0.03, 0.02], dtype=np.float64)
+        solve_seirs_numba(0.0, 0.1, y0, 0.3, 0.2, 0.1, 0.002, 1e-10, 1e-12)
+
+    def solve(self, problem: dict, **kwargs) -> Any:
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        y0 = np.array(problem["y0"], dtype=np.float64)
+        params = problem["params"]
+        beta = float(params["beta"])
+        sigma = float(params["sigma"])
+        gamma = float(params["gamma"])
+        omega = float(params["omega"])
+
+        # Use tight tolerances to match reference solution
+        rtol = 1e-10
+        atol = 1e-12
+
+        result = solve_seirs_numba(t0, t1, y0, beta, sigma, gamma, omega, rtol, atol)
+        return result.tolist()
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 7.5271s
+Total Solver Time:   0.0855s
+Raw Speedup:         87.9924 x
+Final Reward (Score): 87.9924
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+========================= 3 passed in 94.49s (0:01:34) =========================

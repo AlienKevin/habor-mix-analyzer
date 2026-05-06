@@ -1,0 +1,76 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+class Solver:
+    def __init__(self):
+        # Pre-import scipy.linalg to avoid import overhead during solve
+        import scipy.linalg
+        self._sqrtm = scipy.linalg.sqrtm
+    
+    def solve(self, problem, **kwargs) -> Any:
+        """
+        Solves the matrix square root problem.
+        
+        Computes the principal matrix square root X such that X @ X = A.
+        Optimized by calling scipy.linalg.sqrtm without deprecated disp argument.
+        
+        :param problem: A dictionary representing the matrix square root problem.
+        :return: A dictionary with key "sqrtm" containing the solution.
+        """
+        A = problem["matrix"]
+        
+        # Convert input to numpy array if needed
+        if not isinstance(A, np.ndarray):
+            A = np.asarray(A, dtype=complex)
+        elif A.dtype != complex:
+            A = A.astype(complex)
+        
+        try:
+            # Call sqrtm without disp=False to get just the matrix
+            # This is faster than the deprecated disp=False which returns a tuple
+            X = self._sqrtm(A)
+        except Exception as e:
+            logger.error(f"scipy.linalg.sqrtm failed: {e}")
+            return {"sqrtm": {"X": []}}
+        
+        # Check for non-finite values in the result
+        if not np.all(np.isfinite(X)):
+            logger.warning("sqrtm returned non-finite values")
+            return {"sqrtm": {"X": []}}
+        
+        return {"sqrtm": {"X": X.tolist()}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 25.3979s
+Total Solver Time:   11.9725s
+Raw Speedup:         2.1214 x
+Final Reward (Score): 2.1214
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================= 3 passed, 1100 warnings in 543.35s (0:09:03) =================

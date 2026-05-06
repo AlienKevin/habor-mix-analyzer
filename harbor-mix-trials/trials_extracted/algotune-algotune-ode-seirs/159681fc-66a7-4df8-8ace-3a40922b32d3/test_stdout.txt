@@ -1,0 +1,256 @@
+--- Final Solver (used for performance test) ---
+"""
+SEIRS Epidemic Model Solver - Optimized Version
+
+This module implements an optimized Solver class for the SEIRS epidemic model.
+Key optimizations:
+1. Numba JIT compilation for the ODE function (avoids Python interpreter overhead)
+2. Using odeint which leverages LSODA solver
+3. Optimal tolerances for accuracy vs speed trade-off
+"""
+
+import numpy as np
+from typing import Any
+from scipy.integrate import odeint
+import numba
+
+
+# JIT-compiled derivatives function - runs in optimized machine code
+@numba.njit(fastmath=True)
+def _seirs_derivatives(y: np.ndarray, beta: float, sigma: float,
+                        gamma: float, omega: float) -> np.ndarray:
+    """
+    Compute derivatives for the SEIRS model.
+
+    Parameters
+    ----------
+    y : np.ndarray
+        Current state [S, E, I, R]
+    beta : float
+        Transmission rate
+    sigma : float
+        Rate at which exposed individuals become infectious
+    gamma : float
+        Recovery rate
+    omega : float
+        Rate of immunity loss
+
+    Returns
+    -------
+    np.ndarray
+        Derivatives [dS/dt, dE/dt, dI/dt, dR/dt]
+    """
+    S, E, I, R = y
+    beta_S_I = beta * S * I
+    return np.array([
+        -beta_S_I + omega * R,
+        beta_S_I - sigma * E,
+        sigma * E - gamma * I,
+        gamma * I - omega * R
+    ])
+
+
+class Solver:
+    """
+    Optimized Solver for the SEIRS epidemic model.
+
+    The SEIRS model describes the flow of individuals between four states:
+    Susceptible (S), Exposed (E), Infectious (I), and Recovered (R).
+    """
+
+    def __init__(self):
+        """Initialize the solver and pre-compile the JIT function."""
+        # Pre-compile the JIT function with dummy values
+        _seirs_derivatives(np.array([0.8, 0.1, 0.05, 0.05]), 0.3, 0.2, 0.1, 0.01)
+
+    def solve(self, problem: dict, **kwargs) -> list:
+        """
+        Solve the SEIRS epidemic model.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing:
+            - t0: Initial time (float)
+            - t1: Final time (float)
+            - y0: Initial conditions [S0, E0, I0, R0] as fractions
+            - params: Dictionary with beta, sigma, gamma, omega
+
+        Returns
+        -------
+        list[float]
+            Final state [S, E, I, R] at time t1 as a list of floats
+        """
+        t0 = problem["t0"]
+        t1 = problem["t1"]
+        y0 = problem["y0"]
+        params = problem["params"]
+
+        beta = params["beta"]
+        sigma = params["sigma"]
+        gamma = params["gamma"]
+        omega = params["omega"]
+
+        # Convert y0 to numpy array
+        y0_arr = np.asarray(y0, dtype=np.float64)
+
+        # Wrapper function that calls the JIT-compiled function
+        def derivs(y, t):
+            return _seirs_derivatives(y, beta, sigma, gamma, omega)
+
+        # Use odeint with optimal tolerances
+        sol = odeint(derivs, y0_arr, [t0, t1], rtol=1e-7, atol=1e-10)
+
+        return sol[-1].tolist()
+
+    def is_solution(self, problem: dict, solution: list) -> bool:
+        """
+        Validate that the solution satisfies the SEIRS model constraints.
+
+        Parameters
+        ----------
+        problem : dict
+            Original problem dictionary
+        solution : list
+            Proposed solution to validate
+
+        Returns
+        -------
+        bool
+            True if solution is valid, False otherwise
+        """
+        import logging
+
+        if not all(k in problem for k in ["params", "y0", "t0", "t1"]):
+            logging.error("Problem dictionary missing required keys.")
+            return False
+
+        proposed_list = solution
+
+        try:
+            y0_arr = np.array(problem["y0"])
+            proposed_array = np.array(proposed_list, dtype=float)
+        except Exception:
+            logging.error("Could not convert 'y_final' or 'y0' to numpy arrays.")
+            return False
+
+        if proposed_array.shape != y0_arr.shape:
+            logging.error(f"Output shape {proposed_array.shape} != input shape {y0_arr.shape}.")
+            return False
+        if not np.all(np.isfinite(proposed_array)):
+            logging.error("Proposed 'y_final' contains non-finite values.")
+            return False
+
+        # Check if the solution components sum to approximately 1 (conservation law)
+        if not np.isclose(np.sum(proposed_array), 1.0, rtol=1e-5, atol=1e-8):
+            logging.error(
+                f"Solution components sum to {np.sum(proposed_array)}, not 1.0 (conservation violation)."
+            )
+            return False
+
+        try:
+            ref_solution = self.solve(problem)
+            ref_array = np.array(ref_solution)
+        except Exception as e:
+            logging.error(f"Error computing reference solution: {e}")
+            return False
+
+        if ref_array.shape != y0_arr.shape:
+            logging.error(f"Reference shape {ref_array.shape} mismatch input {y0_arr.shape}.")
+            return False
+        if not np.all(np.isfinite(ref_array)):
+            logging.error("Reference solution contains non-finite values.")
+            return False
+
+        rtol, atol = 1e-5, 1e-8
+        if not np.allclose(proposed_array, ref_array, rtol=rtol, atol=atol):
+            abs_diff = np.max(np.abs(proposed_array - ref_array))
+            rel_diff = np.max(
+                np.abs((proposed_array - ref_array) / (atol + rtol * np.abs(ref_array)))
+            )
+            logging.error(
+                f"Solution verification failed: max abs err={abs_diff:.3g}, max rel err={rel_diff:.3g}"
+            )
+            return False
+
+        return True
+
+
+# Create a global solver instance for convenience
+_solver = None
+
+def solve(problem: dict, **kwargs) -> list:
+    """
+    Convenience function to solve the SEIRS model.
+
+    Parameters
+    ----------
+    problem : dict
+        Problem dictionary
+
+    Returns
+    -------
+    list[float]
+        Final state [S, E, I, R]
+    """
+    global _solver
+    if _solver is None:
+        _solver = Solver()
+    return _solver.solve(problem, **kwargs)--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: False
+Total Baseline Time: 0.0000s
+Total Solver Time:   0.0000s
+Raw Speedup:         0.0000 x
+Final Reward (Score): 1.0000
+---------------------------
+FF
+
+=================================== FAILURES ===================================
+_____________________________ test_solver_validity _____________________________
+
+performance_results = {'raw_speedup': 0.0, 'speedup': 1.0, 'validity': False}
+
+    def test_solver_validity(performance_results):
+        """Ensures the solver produces valid outputs."""
+        if not performance_results["validity"]:
+>           pytest.fail("Solver produced invalid solutions on the test set.")
+E           Failed: Solver produced invalid solutions on the test set.
+
+/tests/test_outputs.py:193: Failed
+------------------------------ Captured log setup ------------------------------
+ERROR    root:evaluator.py:164 Solution verification failed: max abs err=0.0194, max rel err=5.44e+04
+ERROR    test_outputs:test_outputs.py:90 Solver produced an invalid solution during warmup.
+WARNING  test_outputs:test_outputs.py:165 Invalid solution detected. Assigning mercy score of 1.0.
+_____________________________ test_solver_speedup ______________________________
+
+performance_results = {'raw_speedup': 0.0, 'speedup': 1.0, 'validity': False}
+
+    def test_solver_speedup(performance_results):
+        """Checks if the solver effectively optimized the code."""
+>       assert performance_results["raw_speedup"] > 1.0, \
+            f"Solver was not faster than baseline (Speedup: {performance_results['raw_speedup']:.2f}x)"
+E       AssertionError: Solver was not faster than baseline (Speedup: 0.00x)
+E       assert 0.0 > 1.0
+
+/tests/test_outputs.py:198: AssertionError
+=============================== warnings summary ===============================
+test_outputs.py::test_solver_validity
+  /app/solver.py:101: ODEintWarning: Excess work done on this call (perhaps wrong Dfun type). Run with full_output = 1 to get quantitative information.
+    sol = odeint(derivs, y0_arr, [t0, t1], rtol=1e-7, atol=1e-10)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+FAILED ../tests/test_outputs.py::test_solver_validity - Failed: Solver produc...
+FAILED ../tests/test_outputs.py::test_solver_speedup - AssertionError: Solver...
+==================== 2 failed, 1 passed, 1 warning in 0.93s ====================

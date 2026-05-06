@@ -1,0 +1,109 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import scipy.linalg._matfuncs as _matfuncs
+
+
+def _sqrtm_2x2(A):
+    """Closed-form principal square root of a 2x2 matrix.
+    
+    Uses the formula from Higham's "Functions of Matrices" for 2x2 matrices.
+    Returns None if the formula fails (falls back to general method).
+    """
+    a, b = A[0, 0], A[0, 1]
+    c, d = A[1, 0], A[1, 1]
+    
+    det = a * d - b * c
+    sqrt_det = np.sqrt(det)
+    
+    tau = a + d + 2.0 * sqrt_det
+    s = np.sqrt(tau)
+    
+    if abs(s) < 1e-30:
+        return None
+    
+    X = np.empty((2, 2), dtype=A.dtype)
+    X[0, 0] = (a + sqrt_det) / s
+    X[0, 1] = b / s
+    X[1, 0] = c / s
+    X[1, 1] = (d + sqrt_det) / s
+    
+    return X
+
+
+class Solver:
+    def solve(self, problem, **kwargs):
+        """
+        Computes the principal matrix square root X such that X @ X = A.
+        
+        Uses direct call to scipy's recursive_schur_sqrtm (bypassing the
+        sqrtm wrapper overhead) with a closed-form shortcut for 2x2 matrices.
+        """
+        # Parse input efficiently: handle numpy arrays, lists, strings, or complex objects
+        raw = problem["matrix"]
+        A = np.asarray(raw)
+        
+        # Convert to complex if needed (handles string inputs and real arrays)
+        if not np.issubdtype(A.dtype, np.complexfloating):
+            if A.dtype.kind in ('U', 'S', 'O'):  # string or object dtype
+                A = np.array(A.tolist(), dtype=np.complex128)
+            else:
+                A = A.astype(np.complex128)
+        
+        n = A.shape[0]
+        
+        # Handle 1x1 case directly
+        if n == 1:
+            val = np.sqrt(A[0, 0])
+            X = np.array([[val]], dtype=np.complex128)
+            return {"sqrtm": {"X": X.tolist()}}
+        
+        # Handle 2x2 case with closed-form formula
+        if n == 2:
+            X = _sqrtm_2x2(A)
+            if X is not None:
+                # Verify the result
+                residual = X @ X - A
+                if np.max(np.abs(residual)) < 1e-8:
+                    return {"sqrtm": {"X": X.tolist()}}
+            # Fall through to general method if closed-form fails
+        
+        # General case: use scipy's recursive Schur method directly
+        # This bypasses the overhead in scipy.linalg.sqrtm wrapper
+        # (input validation, deprecation warnings, error estimation, etc.)
+        try:
+            result = _matfuncs.recursive_schur_sqrtm(A)
+            X = result[0]
+        except Exception:
+            return {"sqrtm": {"X": []}}
+        
+        return {"sqrtm": {"X": X.tolist()}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 23.2157s
+Total Solver Time:   12.7334s
+Raw Speedup:         1.8232 x
+Final Reward (Score): 1.8232
+---------------------------
+..
+
+=============================== warnings summary ===============================
+test_outputs.py: 1100 warnings
+  /tests/evaluator.py:79: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+    X, _ = scipy.linalg.sqrtm(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+================= 3 passed, 1100 warnings in 532.24s (0:08:52) =================

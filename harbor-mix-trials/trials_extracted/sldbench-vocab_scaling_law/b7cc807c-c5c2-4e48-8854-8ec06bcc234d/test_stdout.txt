@@ -1,0 +1,142 @@
+---- LAW BEGIN ----
+import math
+
+def law(input_data: list[dict[str, float]], group: str) -> list[dict[str, float]]:
+    """
+    Predicts unigram_normalized_loss based on a discovered scaling law.
+
+    The law is a quadratic function in log(num_characters) with coefficients
+    that depend linearly on log(non_vocab_parameters) and log(vocab_size).
+
+    Formula:
+        loss = c0 + c1*logN + c2*logV + c3*logD + c4*logN*logD + c5*logV*logD + c6*logD^2
+    where:
+        logN = log(non_vocab_parameters)
+        logV = log(vocab_size)
+        logD = log(num_characters)
+    """
+    # Coefficients fitted on the provided training data (group: all_data)
+    # The functional form is universal; coefficients may vary per group.
+    coefficients = {
+        'all_data': {
+            'c0': 39.8303096005,
+            'c1': 0.9555098927,
+            'c2': 1.3902096632,
+            'c3': -4.7325503969,
+            'c4': -0.0447565253,
+            'c5': -0.0575648858,
+            'c6': 0.1235083003
+        }
+    }
+    
+    # Use coefficients for the requested group; default to 'all_data' if unseen
+    if group in coefficients:
+        c = coefficients[group]
+    else:
+        c = coefficients['all_data']
+    
+    results = []
+    for data_point in input_data:
+        N = data_point['non_vocab_parameters']
+        V = data_point['vocab_size']
+        D = data_point['num_characters']
+        
+        logN = math.log(N)
+        logV = math.log(V)
+        logD = math.log(D)
+        
+        loss = (c['c0'] 
+                + c['c1'] * logN 
+                + c['c2'] * logV 
+                + c['c3'] * logD 
+                + c['c4'] * logN * logD 
+                + c['c5'] * logV * logD 
+                + c['c6'] * logD * logD)
+        
+        results.append({'unigram_normalized_loss': loss})
+    
+    return results
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Scaling Law for Unigram-Normalized Loss
+
+## Mathematical Formula
+
+The discovered scaling law is:
+
+$$
+\text{loss} = c_0 + c_1 \ln N + c_2 \ln V + c_3 \ln D + c_4 \ln N \ln D + c_5 \ln V \ln D + c_6 (\ln D)^2
+$$
+
+where:
+- $N$ = `non_vocab_parameters` (number of non-vocabulary model parameters)
+- $V$ = `vocab_size` (vocabulary size)
+- $D$ = `num_characters` (total characters in training data)
+- $\ln$ denotes the natural logarithm
+
+This formula can be rearranged as a quadratic in $\ln D$:
+
+$$
+\text{loss} = c_6 (\ln D)^2 + (c_3 + c_4 \ln N + c_5 \ln V) \ln D + (c_0 + c_1 \ln N + c_2 \ln V)
+$$
+
+Which has the form:
+
+$$
+\text{loss} = A \cdot (\ln D)^2 + B(N,V) \cdot \ln D + C(N,V)
+$$
+
+where $A = c_6$ is a universal constant, and $B(N,V)$ and $C(N,V)$ are linear functions of $\ln N$ and $\ln V$.
+
+## Reasoning and Methodology
+
+1. **Exploratory Data Analysis**: The dataset contained 1080 data points with one group (`all_data`). I examined correlations between the target variable (`unigram_normalized_loss`) and the log-transformed predictors. Strong negative correlations were found with $\ln(\text{num_characters})$ ($r = -0.93$) and $\ln(\text{non_vocab_parameters})$ ($r = -0.79$), while `vocab_size` showed weak correlation.
+
+2. **Functional Form Discovery**: I analyzed per-group behavior by grouping data by unique $(N, V)$ combinations (54 groups). For each group, I regressed loss against $\ln D$ and found that:
+   - The relationship exhibits significant curvature (loss is quadratic in $\ln D$)
+   - The linear and quadratic coefficients vary systematically with $\ln N$ and $\ln V$
+
+3. **Model Selection**: I tested several candidate models using leave-one-group-out cross-validation (54-fold, each fold holding out one $(N,V)$ combination):
+
+   | Model | Test MSE |
+   |-------|----------|
+   | Linear in logs | 0.0831 |
+   | Linear + interactions | 0.0276 |
+   | Linear + interactions + $(\ln D)^2$ | **0.0089** |
+   | Linear + $(\ln D)^2$ (no interactions) | 0.0162 |
+
+   The model with interaction terms and $(\ln D)^2$ achieved the lowest extrapolation error and an overall $R^2$ of 0.987 on the full dataset.
+
+4. **Parameter Fitting**: The final coefficients were obtained by ordinary least squares regression on the complete training data.
+
+## Fitted Parameters
+
+For the group `all_data`:
+
+| Parameter | Coefficient | Value |
+|-----------|-------------|-------|
+| $c_0$ | intercept | 39.8303096005 |
+| $c_1$ | $\ln N$ | 0.9555098927 |
+| $c_2$ | $\ln V$ | 1.3902096632 |
+| $c_3$ | $\ln D$ | -4.7325503969 |
+| $c_4$ | $\ln N \cdot \ln D$ | -0.0447565253 |
+| $c_5$ | $\ln V \cdot \ln D$ | -0.0575648858 |
+| $c_6$ | $(\ln D)^2$ | 0.1235083003 |
+
+All coefficients are statistically significant (all $|t| > 10$).
+
+## Interpretation
+
+The quadratic form in $\ln D$ implies that for fixed model size parameters $(N, V)$, there exists an optimal amount of training data $D_{\text{opt}}$ that minimizes loss:
+
+$$
+\ln D_{\text{opt}} = -\frac{B(N,V)}{2A} = -\frac{c_3 + c_4 \ln N + c_5 \ln V}{2c_6}
+$$
+
+Since $c_6 > 0$, the parabola opens upward, meaning loss decreases up to $D_{\text{opt}}$ and then increases beyond it (overfitting region). The optimal data size $D_{\text{opt}}$ increases with $N$ and $V$ (since $c_4, c_5 < 0$, making $\ln D_{\text{opt}}$ larger when $N$ or $V$ increases).
+
+This aligns with the intuition that larger models require more training data to reach optimal performance.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9698357250068915

@@ -4,18 +4,17 @@ For adapters paper experiments (correlation study, trajectory analysis, etc.) an
 
 ## `analyze.py` — per-trial codex auditor
 
-`analyze.py` takes a Harbor-Mix task id and spawns up to 18 `codex exec` sessions in parallel, one per trial of that task, and asks each to produce a structured failure analysis. It expects two local-only inputs:
+`analyze.py` takes a Harbor-Mix task id and spawns up to 18 `codex exec` sessions in parallel, one per trial of that task, and asks each to produce a structured failure analysis. The two data inputs ship in-repo, so a fresh `git clone` is sufficient:
 
 ```
-harbor-mix-trials/                                           # trial corpus (gitignored)
+harbor-mix-trials/                                           # trial corpus (~616 MB, in-repo)
 ├── trials_extracted/<sanitised_task>/<trial_id>/
-│   ├── trajectory.json    — agent transcript (input)
-│   ├── result.json        — harbor wrapper's reward + exception (input)
-│   ├── test_stdout.txt    — verifier pytest output (backfilled, see below)
-│   └── reward.txt         — verifier reward marker (backfilled)
+│   ├── trajectory.json     — agent transcript
+│   ├── result.json         — harbor wrapper's reward + exception
+│   └── test_stdout.txt     — verifier pytest output
 └── uploaded_trials.jsonl
 
-task_dataset/                                                # canonical task source (gitignored)
+task_dataset/                                                # canonical task source (~116 MB, in-repo)
 └── harbor-mix/datasets/{daytona,modal}/<daytona_name>/
     ├── instruction.md           — canonical task brief
     ├── tests/test.sh            — verifier entrypoint, defines reward gating
@@ -25,18 +24,13 @@ task_dataset/                                                # canonical task so
     └── task.toml                — timeouts, scoring mode, image tag
 ```
 
-(matching the shape of the `harbor-mix-final-for-analysis` dataset and the `harbor-framework/harbor-adapters-experiments` repo respectively). Both are gitignored — keep them local. Setup:
+If `test_stdout.txt` is missing for some trials (or you want to refresh after a corpus update), re-run the backfill:
 
 ```bash
-# trial corpus: get from the original distribution (out of scope for this README)
+python3 backfill_test_stdout.py        # idempotent; ~93 s at 32 parallel for 1777 trials
+```
 
-# task source: sparse-clone harbor-mix/datasets only (~150 MB)
-git clone --filter=blob:none --depth=1 --sparse \
-    https://github.com/harbor-framework/harbor-adapters-experiments.git task_dataset
-git -C task_dataset sparse-checkout set harbor-mix/datasets
-
-# verifier outputs (test_stdout.txt + reward.txt per trial, ~5 MB total):
-python3 backfill_test_stdout.py        # idempotent; takes ~8 min for 1777 trials
+Source provenance: `harbor-mix-trials/` originates from the `harbor-mix-final-for-analysis` dataset (Harbor production Supabase, materialized view `mv_harbor_mix_kept_w5`); `task_dataset/` mirrors `harbor-framework/harbor-adapters-experiments@main:harbor-mix/datasets/`.
 ```
 
 The auditor prompt references, per trial:

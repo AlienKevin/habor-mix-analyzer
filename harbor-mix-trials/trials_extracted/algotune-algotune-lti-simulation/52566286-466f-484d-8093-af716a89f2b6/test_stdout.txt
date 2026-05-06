@@ -1,0 +1,166 @@
+--- Final Solver (used for performance test) ---
+from __future__ import annotations
+
+from typing import Any
+from functools import lru_cache
+import numpy as np
+from scipy import signal, linalg
+from numba import njit
+
+
+@njit(cache=False)
+def _simulate_foh_siso(u, Ad, Bd0, Bd1, C, d):
+    n_steps = u.shape[0]
+    n_states = Ad.shape[0]
+    y = np.empty(n_steps, dtype=np.float64)
+    x = np.zeros(n_states, dtype=np.float64)
+
+    # x(0) is zero.  y(0) = C*x(0) + D*u(0).
+    if n_steps == 0:
+        return y
+    y[0] = d * u[0]
+
+    xnew = np.empty(n_states, dtype=np.float64)
+    for i in range(1, n_steps):
+        um = u[i - 1]
+        ui = u[i]
+        for j in range(n_states):
+            s = 0.0
+            for k in range(n_states):
+                # scipy.signal.lsim stores states as row vectors:
+                # x[i] = x[i-1] @ Ad + u[i-1]*Bd0 + u[i]*Bd1
+                s += x[k] * Ad[k, j]
+            xnew[j] = s + um * Bd0[j] + ui * Bd1[j]
+
+        yy = d * ui
+        for j in range(n_states):
+            x[j] = xnew[j]
+            yy += C[j] * xnew[j]
+        y[i] = yy
+    return y
+
+
+@lru_cache(maxsize=256)
+def _lsim_foh_mats(num_key, den_key, dt_key):
+    """Cached matrices for scipy.signal.lsim's default linear-interp update."""
+    num = np.asarray(num_key, dtype=np.float64)
+    den = np.asarray(den_key, dtype=np.float64)
+    dt = float(dt_key)
+
+    A, B, C, D = signal.tf2ss(num, den)
+    A = np.asarray(A, dtype=np.float64)
+    B = np.asarray(B, dtype=np.float64)
+    C = np.asarray(C, dtype=np.float64)
+    D = np.asarray(D, dtype=np.float64)
+
+    n_states = A.shape[0]
+    n_inputs = B.shape[1]
+    # The task is transfer-function simulation, hence SISO.  Keep fallback for
+    # anything surprising rather than silently producing wrong shapes.
+    if n_inputs != 1 or C.shape[0] != 1:
+        raise ValueError("Only SISO systems are supported by the fast path")
+
+    # This is the exact matrix construction used by scipy.signal.lsim for
+    # interp=True.  The transpose is intentional: lsim propagates row states.
+    M = np.vstack([
+        np.hstack([A * dt, B * dt, np.zeros((n_states, n_inputs))]),
+        np.hstack([np.zeros((n_inputs, n_states + n_inputs)), np.identity(n_inputs)]),
+        np.zeros((n_inputs, n_states + 2 * n_inputs)),
+    ])
+    expMT = linalg.expm(M.T)
+    Ad = expMT[:n_states, :n_states]
+    Bd1 = expMT[n_states + n_inputs:, :n_states]
+    Bd0 = expMT[n_states:n_states + n_inputs, :n_states] - Bd1
+
+    return (
+        np.ascontiguousarray(Ad, dtype=np.float64),
+        np.ascontiguousarray(Bd0.ravel(), dtype=np.float64),
+        np.ascontiguousarray(Bd1.ravel(), dtype=np.float64),
+        np.ascontiguousarray(C.ravel(), dtype=np.float64),
+        float(D.ravel()[0]) if D.size else 0.0,
+    )
+
+
+def _key_from_arr(a):
+    arr = np.asarray(a, dtype=np.float64).ravel()
+    return tuple(float(x) for x in arr)
+
+
+class Solver:
+    def __init__(self):
+        # Warm up numba.  The prompt states init/compilation time is not counted.
+        _simulate_foh_siso(
+            np.array([0.0, 0.0], dtype=np.float64),
+            np.zeros((1, 1), dtype=np.float64),
+            np.zeros(1, dtype=np.float64),
+            np.zeros(1, dtype=np.float64),
+            np.zeros(1, dtype=np.float64),
+            0.0,
+        )
+
+    def solve(self, problem, **kwargs) -> Any:
+        num_in = problem["num"]
+        den_in = problem["den"]
+        u_in = problem["u"]
+        t_in = problem["t"]
+
+        u = np.asarray(u_in, dtype=np.float64).ravel()
+        t = np.asarray(t_in, dtype=np.float64).ravel()
+        n = t.size
+
+        if n == 0:
+            return {"yout": []}
+
+        num = np.asarray(num_in, dtype=np.float64).ravel()
+        den = np.asarray(den_in, dtype=np.float64).ravel()
+
+        # Zero input and zero initial state => zero output for any proper LTI.
+        if u.size == n and not np.any(u):
+            return {"yout": [0.0] * int(n)}
+
+        # Static gain: exact and much faster than state-space setup.
+        if den.size == 1 and num.size == 1:
+            return {"yout": (float(num[0] / den[0]) * u).tolist()}
+
+        # Single sample: scipy.signal.lsim returns D*u[0] with zero IC.
+        if n == 1:
+            try:
+                d = float(num[0] / den[0]) if num.size == den.size else 0.0
+                return {"yout": [d * float(u[0])]}
+            except Exception:
+                _, yout, _ = signal.lsim(signal.lti(num, den), u, t)
+                return {"yout": np.asarray(yout, dtype=np.float64).ravel().tolist()}
+
+        try:
+            dt = float(t[1] - t[0])
+            Ad, Bd0, Bd1, C, d = _lsim_foh_mats(_key_from_arr(num), _key_from_arr(den), dt)
+            y = _simulate_foh_siso(np.ascontiguousarray(u, dtype=np.float64), Ad, Bd0, Bd1, C, d)
+            return {"yout": y.tolist()}
+        except Exception:
+            # Exact reference fallback for unusual/improper inputs.
+            _, yout, _ = signal.lsim(signal.lti(num, den), u, t)
+            return {"yout": np.asarray(yout, dtype=np.float64).ravel().tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 8.9674s
+Total Solver Time:   0.0599s
+Raw Speedup:         149.7954 x
+Final Reward (Score): 149.7954
+---------------------------
+..
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+PASSED ../tests/test_outputs.py::test_solver_speedup
+======================== 3 passed in 111.95s (0:01:51) =========================

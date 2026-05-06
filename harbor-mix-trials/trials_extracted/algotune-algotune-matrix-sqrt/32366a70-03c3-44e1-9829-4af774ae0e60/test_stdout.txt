@@ -1,0 +1,120 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+import scipy.linalg
+import warnings
+import logging
+
+# Suppress warnings globally
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=scipy.linalg.LinAlgWarning)
+
+def _sqrtm_2x2(A):
+    """Closed-form principal square root for 2x2 matrix."""
+    # Ensure complex
+    A = np.asarray(A, dtype=complex)
+    a, b = A[0, 0], A[0, 1]
+    c, d = A[1, 0], A[1, 1]
+    # Compute trace and determinant
+    tr = a + d
+    det = a * d - b * c
+    # Compute eigenvalues of A
+    # lambda1,2 = (tr ± sqrt(tr^2 - 4*det))/2
+    disc = np.sqrt(tr**2 - 4*det)
+    lam1 = (tr + disc) / 2
+    lam2 = (tr - disc) / 2
+    # Compute sqrt of eigenvalues with non-negative real part
+    sqrt_lam1 = np.sqrt(lam1)
+    if sqrt_lam1.real < 0:
+        sqrt_lam1 = -sqrt_lam1
+    sqrt_lam2 = np.sqrt(lam2)
+    if sqrt_lam2.real < 0:
+        sqrt_lam2 = -sqrt_lam2
+    # Compute square root matrix using Sylvester's formula
+    # If eigenvalues are distinct
+    if abs(lam1 - lam2) > 1e-12:
+        # X = (sqrt_lam1 * (A - lam2*I) - sqrt_lam2 * (A - lam1*I)) / (lam1 - lam2)
+        I = np.eye(2, dtype=complex)
+        X = (sqrt_lam1 * (A - lam2 * I) - sqrt_lam2 * (A - lam1 * I)) / (lam1 - lam2)
+    else:
+        # Repeated eigenvalue: use derivative
+        # X = sqrt_lam1 * (I + (A - lam1*I) / (2*lam1))
+        # Actually, for repeated eigenvalue, the formula is more involved.
+        # Use scipy.linalg.sqrtm for safety.
+        X, _ = scipy.linalg.sqrtm(A, disp=False)
+    return X
+
+class Solver:
+    def solve(self, problem, **kwargs) -> dict:
+        """
+        Compute the principal matrix square root.
+        
+        :param problem: dict with key 'matrix' containing a list of lists of complex numbers.
+        :return: dict with key 'sqrtm' containing dict with key 'X' as list of lists of complex numbers.
+        """
+        A = problem['matrix']
+        # Convert to numpy array if not already, using asarray to avoid copy if possible
+        if not isinstance(A, np.ndarray):
+            A = np.asarray(A, dtype=complex)
+        else:
+            # Ensure dtype is complex
+            if A.dtype != complex:
+                A = A.astype(complex)
+        
+        # Ensure matrix is square
+        if A.ndim != 2 or A.shape[0] != A.shape[1]:
+            logging.error('Input matrix is not square.')
+            return {'sqrtm': {'X': []}}
+        
+        n = A.shape[0]
+        if n == 2:
+            X = _sqrtm_2x2(A)
+        else:
+            # Compute principal square root
+            try:
+                # Use blocksize=2 for potential speedup on larger matrices
+                X, _ = scipy.linalg.sqrtm(A, disp=False, blocksize=2)
+            except Exception as e:
+                logging.error(f'scipy.linalg.sqrtm failed: {e}')
+                return {'sqrtm': {'X': []}}
+        
+        # Convert to list of lists of complex numbers
+        X_list = X.tolist()
+        return {'sqrtm': {'X': X_list}}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .
+--- Performance Summary ---
+Validity: True
+Total Baseline Time: 31.6243s
+Total Solver Time:   31.7912s
+Raw Speedup:         0.9948 x
+Final Reward (Score): 1.0000
+---------------------------
+.F
+
+=================================== FAILURES ===================================
+_____________________________ test_solver_speedup ______________________________
+
+performance_results = {'raw_speedup': 0.994750126533547, 'speedup': 1.0, 'validity': True}
+
+    def test_solver_speedup(performance_results):
+        """Checks if the solver effectively optimized the code."""
+>       assert performance_results["raw_speedup"] > 1.0, \
+            f"Solver was not faster than baseline (Speedup: {performance_results['raw_speedup']:.2f}x)"
+E       AssertionError: Solver was not faster than baseline (Speedup: 0.99x)
+E       assert 0.994750126533547 > 1.0
+
+/tests/test_outputs.py:198: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+PASSED ../tests/test_outputs.py::test_solver_validity
+FAILED ../tests/test_outputs.py::test_solver_speedup - AssertionError: Solver...
+=================== 1 failed, 2 passed in 897.25s (0:14:57) ====================

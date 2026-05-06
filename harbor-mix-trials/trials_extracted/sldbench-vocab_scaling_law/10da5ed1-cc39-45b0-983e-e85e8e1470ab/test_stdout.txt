@@ -1,0 +1,133 @@
+---- LAW BEGIN ----
+import math
+
+# Fitted parameters for the (single) experimental group 'all_data'.
+# Form: L = E + A * V^g1 / N^a + B * V^g2 / D^b
+# where:
+#   N = non_vocab_parameters
+#   V = vocab_size
+#   D = num_characters
+_PARAMS = {
+    'all_data': {
+        'E':  -6.209244,
+        'A':  13.129690,
+        'a':   0.089770,
+        'B':   2344.110,
+        'b':   0.387940,
+        'g1': -0.124701,
+        'g2':  0.125529,
+    }
+}
+
+# Default fall-back parameters (use 'all_data' if unknown group is requested).
+_DEFAULT_GROUP = 'all_data'
+
+
+def law(input_data, group):
+    """Predict the unigram-normalized loss using the discovered scaling law.
+
+    L(N, V, D) = E + A * V^{g1} / N^{a} + B * V^{g2} / D^{b}
+    """
+    p = _PARAMS.get(group, _PARAMS[_DEFAULT_GROUP])
+    E  = p['E']
+    A  = p['A']
+    a  = p['a']
+    B  = p['B']
+    b  = p['b']
+    g1 = p['g1']
+    g2 = p['g2']
+
+    out = []
+    for row in input_data:
+        N = float(row['non_vocab_parameters'])
+        V = float(row['vocab_size'])
+        D = float(row['num_characters'])
+        pred = (
+            E
+            + A * (V ** g1) / (N ** a)
+            + B * (V ** g2) / (D ** b)
+        )
+        out.append({'unigram_normalized_loss': pred})
+    return out
+---- LAW END ----
+---- EXPLAIN BEGIN ----
+# Discovered Scaling Law
+
+## Mathematical Formula
+
+Let
+* `N` = `non_vocab_parameters` (number of non-embedding parameters)
+* `V` = `vocab_size`
+* `D` = `num_characters` (number of training characters)
+
+The unigram-normalized loss is modelled by a Chinchilla-style additive
+power-law in which the vocabulary size enters as a multiplicative
+correction on each of the two reducible terms:
+
+```
+L(N, V, D) = E + A · V^{g1} · N^{-a} + B · V^{g2} · D^{-b}
+```
+
+This is a natural extension of the Hoffmann et al. (Chinchilla, 2022)
+law `L = E + A/N^a + B/D^b`.  The vocabulary appears with two
+separate exponents `g1, g2` because increasing `V`:
+
+* slightly **lowers** the parameter-driven term (each parameter
+  becomes more useful when the prediction problem is split into
+  more output classes – `g1 < 0`), and
+* slightly **raises** the data-driven term (each character carries
+  more bits of information about which of the `V` tokens to emit
+  – `g2 > 0`).
+
+Because the loss is *unigram-normalized* (i.e. the unigram cross-
+entropy has been subtracted) the irreducible term `E` is negative.
+
+## Methodology
+
+1. The dataset (1080 rows, single group `all_data`) was loaded with
+   `datasets.load_from_disk` and converted to a `pandas.DataFrame`.
+2. The structure of the design space was inspected: 9 vocab sizes,
+   6 model sizes (non-vocab parameters), and ~20 different training
+   data sizes per `(V, N)` cell.
+3. Per-cell minimum losses showed that the asymptotic loss varies
+   primarily with `N`, hinting at a Chinchilla-like form.
+4. Several functional forms were fit by Nelder–Mead minimisation of
+   the mean-squared error with many random restarts:
+   * Plain Chinchilla `E + A/N^a + B/D^b`  →  MSE 0.0158, R² 0.975.
+   * Vocab modulation on the `N`-term only        →  MSE 0.0107.
+   * Vocab modulation on the `D`-term only        →  MSE 0.0089.
+   * **Vocab modulation on both terms** (chosen)  →  MSE 0.0075,
+     R² 0.988.
+   * More flexible forms (extra additive `1/V^c`, or `E_0 + E_1·V^v`,
+     etc.) gave no meaningful improvement (MSE essentially identical),
+     so the simpler 7-parameter form was kept to avoid over-fitting
+     during extrapolation.
+5. The chosen form was re-fit with 300 random restarts to ensure a
+   global optimum.
+
+## Fitted Parameters
+
+Only one experimental group is present in the data (`all_data`).
+The fitted values are
+
+| parameter | value          | meaning                          |
+|-----------|----------------|----------------------------------|
+| `E`       | `-6.20924`     | irreducible (unigram-normalised) loss |
+| `A`       | `1.31297e+01`  | parameter-term amplitude         |
+| `a`       | `0.08977`      | parameter-term exponent          |
+| `B`       | `2.34411e+03`  | data-term amplitude              |
+| `b`       | `0.38794`      | data-term exponent               |
+| `g1`      | `-0.12470`     | vocab exponent on parameter term |
+| `g2`      | ` 0.12553`     | vocab exponent on data term      |
+
+Final training-set fit quality:
+* MSE = 0.00752
+* R²  = 0.9882
+
+For any unknown group the law falls back to the parameters fitted on
+`all_data`, but the *functional form* is the same for every group, as
+required by the task.
+---- EXPLAIN END ----
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Starting evaluation for task: vocab_scaling_law
+Reward written to /logs/verifier/reward.txt: 0.9803716343559338

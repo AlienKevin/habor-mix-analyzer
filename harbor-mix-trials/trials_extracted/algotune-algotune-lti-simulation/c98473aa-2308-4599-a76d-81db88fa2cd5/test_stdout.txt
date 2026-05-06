@@ -1,0 +1,236 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from scipy.signal import tf2ss, lsim, lti
+from scipy.linalg import expm
+from numba import njit
+
+
+@njit(cache=True, boundscheck=False, fastmath=False)
+def _simulate_uniform(Ad, Bd0, Bd1, C_vec, D_val, u, n_steps, n):
+    yout = np.empty(n_steps)
+    x = np.zeros(n)
+    new_x = np.empty(n)
+    yout[0] = D_val * u[0]
+    for i in range(1, n_steps):
+        u_prev = u[i - 1]
+        u_curr = u[i]
+        for k in range(n):
+            s = Bd0[k] * u_prev + Bd1[k] * u_curr
+            for j in range(n):
+                s += Ad[k, j] * x[j]
+            new_x[k] = s
+        for k in range(n):
+            x[k] = new_x[k]
+        s = D_val * u_curr
+        for k in range(n):
+            s += C_vec[k] * x[k]
+        yout[i] = s
+    return yout
+
+
+def _to_float_array(x):
+    """Convert input to a contiguous float64 array with minimal overhead."""
+    if isinstance(x, np.ndarray):
+        if x.dtype == np.float64 and x.flags['C_CONTIGUOUS']:
+            return x
+        return np.ascontiguousarray(x, dtype=np.float64)
+    return np.fromiter(x, dtype=np.float64, count=len(x))
+
+
+class Solver:
+    def __init__(self):
+        # Trigger JIT compilation (does not count toward solve time)
+        Ad = np.eye(2)
+        Bd0 = np.zeros(2)
+        Bd1 = np.zeros(2)
+        C_vec = np.zeros(2)
+        u = np.zeros(2)
+        _simulate_uniform(Ad, Bd0, Bd1, C_vec, 0.0, u, 2, 2)
+
+    def solve(self, problem, **kwargs):
+        num = problem["num"]
+        den = problem["den"]
+        u = _to_float_array(problem["u"])
+        t = _to_float_array(problem["t"])
+
+        n_steps = u.shape[0]
+        if n_steps == 0:
+            return {"yout": []}
+
+        A, B, C, D = tf2ss(num, den)
+        n = A.shape[0]
+        D_val = float(D.flat[0]) if D.size > 0 else 0.0
+
+        # Pure-gain case (no states)
+        if n == 0:
+            return {"yout": (D_val * u).tolist()}
+
+        if n_steps == 1:
+            return {"yout": [D_val * float(u[0])]}
+
+        # Cheap uniform-spacing check using endpoints (with one diff sanity probe)
+        dt = float(t[1] - t[0])
+        if n_steps > 2:
+            expected_last = t[0] + dt * (n_steps - 1)
+            uniform = abs(float(t[-1]) - expected_last) <= 1e-10 * max(abs(expected_last), 1.0)
+            # Sanity-check a midpoint to catch non-monotonic spacing that still hits the endpoint.
+            if uniform and n_steps > 4:
+                mid = n_steps // 2
+                expected_mid = t[0] + dt * mid
+                uniform = abs(float(t[mid]) - expected_mid) <= 1e-10 * max(abs(expected_mid), 1.0)
+        else:
+            uniform = True
+
+        if uniform:
+            # Build augmented matrix for first-order hold (FOH) discretization.
+            # Mirrors scipy.signal.lsim: dt is baked into A and B blocks only;
+            # the identity coupling block stays as I.
+            M = np.zeros((n + 2, n + 2))
+            M[:n, :n] = A * dt
+            M[:n, n] = B[:, 0] * dt
+            M[n, n + 1] = 1.0
+            expM = expm(M)
+
+            Ad = np.ascontiguousarray(expM[:n, :n])
+            col_n = expM[:n, n]
+            col_n1 = expM[:n, n + 1]
+            Bd1_col = np.ascontiguousarray(col_n1)
+            Bd0_col = np.ascontiguousarray(col_n - col_n1)
+            C_vec = np.ascontiguousarray(C[0])
+
+            yout = _simulate_uniform(Ad, Bd0_col, Bd1_col, C_vec, D_val, u, n_steps, n)
+            return {"yout": yout.tolist()}
+
+        # Fallback: scipy's lsim handles non-uniform case
+        system = lti(num, den)
+        _, yout, _ = lsim(system, u, t)
+        return {"yout": np.asarray(yout).tolist()}
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:47: in __init__
+    _simulate_uniform(Ad, Bd0, Bd1, C_vec, 0.0, u, 2, 2)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x72d2559940e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(solver_module)
+>       return solver_module.Solver()
+               ^^^^^^^^^^^^^^^^^^^^^^
+
+/tests/test_outputs.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+solver.py:47: in __init__
+    _simulate_uniform(Ad, Bd0, Bd1, C_vec, 0.0, u, 2, 2)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x72d2559940e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 1.03s ==========================

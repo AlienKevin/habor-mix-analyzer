@@ -1,0 +1,386 @@
+--- Final Solver (used for performance test) ---
+import numpy as np
+from numba import njit
+
+
+@njit(cache=True, fastmath=True)
+def _seirs_solve(t0, t1, S, E, I, R, beta, sigma, gamma, omega, rtol, atol):
+    """Adaptive Dormand-Prince 5(4) integrator for the SEIRS system.
+
+    Returns final S, E, I, R at t = t1.
+    """
+    # Dormand-Prince 5(4) Butcher tableau coefficients
+    c2 = 1.0 / 5.0
+    c3 = 3.0 / 10.0
+    c4 = 4.0 / 5.0
+    c5 = 8.0 / 9.0
+
+    a21 = 1.0 / 5.0
+    a31 = 3.0 / 40.0
+    a32 = 9.0 / 40.0
+    a41 = 44.0 / 45.0
+    a42 = -56.0 / 15.0
+    a43 = 32.0 / 9.0
+    a51 = 19372.0 / 6561.0
+    a52 = -25360.0 / 2187.0
+    a53 = 64448.0 / 6561.0
+    a54 = -212.0 / 729.0
+    a61 = 9017.0 / 3168.0
+    a62 = -355.0 / 33.0
+    a63 = 46732.0 / 5247.0
+    a64 = 49.0 / 176.0
+    a65 = -5103.0 / 18656.0
+    a71 = 35.0 / 384.0
+    a73 = 500.0 / 1113.0
+    a74 = 125.0 / 192.0
+    a75 = -2187.0 / 6784.0
+    a76 = 11.0 / 84.0
+
+    # 5th order solution coefficients (b) match a7x (FSAL)
+    b1 = 35.0 / 384.0
+    b3 = 500.0 / 1113.0
+    b4 = 125.0 / 192.0
+    b5 = -2187.0 / 6784.0
+    b6 = 11.0 / 84.0
+
+    # Error coefficients (b - b_hat)
+    e1 = 71.0 / 57600.0
+    e3 = -71.0 / 16695.0
+    e4 = 71.0 / 1920.0
+    e5 = -17253.0 / 339200.0
+    e6 = 22.0 / 525.0
+    e7 = -1.0 / 40.0
+
+    t = t0
+
+    # Initial RHS
+    SI = S * I
+    bSI = beta * SI
+    sE = sigma * E
+    gI = gamma * I
+    oR = omega * R
+    k1S = -bSI + oR
+    k1E = bSI - sE
+    k1I = sE - gI
+    k1R = gI - oR
+
+    # Initial step estimate
+    d0 = abs(S) / (atol + rtol * abs(S))
+    d0 += abs(E) / (atol + rtol * abs(E))
+    d0 += abs(I) / (atol + rtol * abs(I))
+    d0 += abs(R) / (atol + rtol * abs(R))
+    d0 = (d0 / 4.0) ** 0.5
+
+    d1 = (k1S * k1S + k1E * k1E + k1I * k1I + k1R * k1R) ** 0.5
+    if d0 < 1e-5 or d1 < 1e-5:
+        h = 1e-6
+    else:
+        h = 0.01 * d0 / d1
+    if h > t1 - t0:
+        h = t1 - t0
+
+    # Safety factor and step bounds
+    SAFETY = 0.9
+    MIN_FACTOR = 0.2
+    MAX_FACTOR = 10.0
+    EXP = -1.0 / 5.0  # error exponent for order 5
+
+    while t < t1:
+        if t + h > t1:
+            h = t1 - t
+
+        # Stage 2
+        yS = S + h * a21 * k1S
+        yE = E + h * a21 * k1E
+        yI = I + h * a21 * k1I
+        yR = R + h * a21 * k1R
+        SI = yS * yI
+        bSI = beta * SI
+        sE = sigma * yE
+        gI = gamma * yI
+        oR = omega * yR
+        k2S = -bSI + oR
+        k2E = bSI - sE
+        k2I = sE - gI
+        k2R = gI - oR
+
+        # Stage 3
+        yS = S + h * (a31 * k1S + a32 * k2S)
+        yE = E + h * (a31 * k1E + a32 * k2E)
+        yI = I + h * (a31 * k1I + a32 * k2I)
+        yR = R + h * (a31 * k1R + a32 * k2R)
+        SI = yS * yI
+        bSI = beta * SI
+        sE = sigma * yE
+        gI = gamma * yI
+        oR = omega * yR
+        k3S = -bSI + oR
+        k3E = bSI - sE
+        k3I = sE - gI
+        k3R = gI - oR
+
+        # Stage 4
+        yS = S + h * (a41 * k1S + a42 * k2S + a43 * k3S)
+        yE = E + h * (a41 * k1E + a42 * k2E + a43 * k3E)
+        yI = I + h * (a41 * k1I + a42 * k2I + a43 * k3I)
+        yR = R + h * (a41 * k1R + a42 * k2R + a43 * k3R)
+        SI = yS * yI
+        bSI = beta * SI
+        sE = sigma * yE
+        gI = gamma * yI
+        oR = omega * yR
+        k4S = -bSI + oR
+        k4E = bSI - sE
+        k4I = sE - gI
+        k4R = gI - oR
+
+        # Stage 5
+        yS = S + h * (a51 * k1S + a52 * k2S + a53 * k3S + a54 * k4S)
+        yE = E + h * (a51 * k1E + a52 * k2E + a53 * k3E + a54 * k4E)
+        yI = I + h * (a51 * k1I + a52 * k2I + a53 * k3I + a54 * k4I)
+        yR = R + h * (a51 * k1R + a52 * k2R + a53 * k3R + a54 * k4R)
+        SI = yS * yI
+        bSI = beta * SI
+        sE = sigma * yE
+        gI = gamma * yI
+        oR = omega * yR
+        k5S = -bSI + oR
+        k5E = bSI - sE
+        k5I = sE - gI
+        k5R = gI - oR
+
+        # Stage 6
+        yS = S + h * (a61 * k1S + a62 * k2S + a63 * k3S + a64 * k4S + a65 * k5S)
+        yE = E + h * (a61 * k1E + a62 * k2E + a63 * k3E + a64 * k4E + a65 * k5E)
+        yI = I + h * (a61 * k1I + a62 * k2I + a63 * k3I + a64 * k4I + a65 * k5I)
+        yR = R + h * (a61 * k1R + a62 * k2R + a63 * k3R + a64 * k4R + a65 * k5R)
+        SI = yS * yI
+        bSI = beta * SI
+        sE = sigma * yE
+        gI = gamma * yI
+        oR = omega * yR
+        k6S = -bSI + oR
+        k6E = bSI - sE
+        k6I = sE - gI
+        k6R = gI - oR
+
+        # 5th order solution
+        Snew = S + h * (b1 * k1S + b3 * k3S + b4 * k4S + b5 * k5S + b6 * k6S)
+        Enew = E + h * (b1 * k1E + b3 * k3E + b4 * k4E + b5 * k5E + b6 * k6E)
+        Inew = I + h * (b1 * k1I + b3 * k3I + b4 * k4I + b5 * k5I + b6 * k6I)
+        Rnew = R + h * (b1 * k1R + b3 * k3R + b4 * k4R + b5 * k5R + b6 * k6R)
+
+        # Stage 7 for FSAL and error estimate
+        SI = Snew * Inew
+        bSI = beta * SI
+        sE = sigma * Enew
+        gI = gamma * Inew
+        oR = omega * Rnew
+        k7S = -bSI + oR
+        k7E = bSI - sE
+        k7I = sE - gI
+        k7R = gI - oR
+
+        # Error estimate
+        errS = h * (e1 * k1S + e3 * k3S + e4 * k4S + e5 * k5S + e6 * k6S + e7 * k7S)
+        errE = h * (e1 * k1E + e3 * k3E + e4 * k4E + e5 * k5E + e6 * k6E + e7 * k7E)
+        errI = h * (e1 * k1I + e3 * k3I + e4 * k4I + e5 * k5I + e6 * k6I + e7 * k7I)
+        errR = h * (e1 * k1R + e3 * k3R + e4 * k4R + e5 * k5R + e6 * k6R + e7 * k7R)
+
+        # Compute error norm
+        scS = atol + rtol * max(abs(S), abs(Snew))
+        scE = atol + rtol * max(abs(E), abs(Enew))
+        scI = atol + rtol * max(abs(I), abs(Inew))
+        scR = atol + rtol * max(abs(R), abs(Rnew))
+
+        err_norm = ((errS / scS) ** 2 + (errE / scE) ** 2 +
+                    (errI / scI) ** 2 + (errR / scR) ** 2) / 4.0
+        err_norm = err_norm ** 0.5
+
+        if err_norm < 1.0:
+            # Accept step
+            t += h
+            S = Snew
+            E = Enew
+            I = Inew
+            R = Rnew
+            # FSAL: reuse k7 as k1 for next step
+            k1S = k7S
+            k1E = k7E
+            k1I = k7I
+            k1R = k7R
+
+            if err_norm == 0.0:
+                factor = MAX_FACTOR
+            else:
+                factor = SAFETY * err_norm ** EXP
+                if factor > MAX_FACTOR:
+                    factor = MAX_FACTOR
+                elif factor < MIN_FACTOR:
+                    factor = MIN_FACTOR
+            h = h * factor
+        else:
+            # Reject step
+            factor = SAFETY * err_norm ** EXP
+            if factor < MIN_FACTOR:
+                factor = MIN_FACTOR
+            h = h * factor
+
+    return S, E, I, R
+
+
+# Trigger JIT compilation at import time (compile time doesn't count)
+_seirs_solve(0.0, 1.0, 0.99, 0.005, 0.005, 0.0, 0.3, 0.2, 0.1, 0.002, 1e-8, 1e-8)
+
+
+class Solver:
+    def solve(self, problem, **kwargs):
+        y0 = problem["y0"]
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        p = problem["params"]
+        beta = float(p["beta"])
+        sigma = float(p["sigma"])
+        gamma = float(p["gamma"])
+        omega = float(p["omega"])
+
+        S, E, I, R = _seirs_solve(
+            t0, t1,
+            float(y0[0]), float(y0[1]), float(y0[2]), float(y0[3]),
+            beta, sigma, gamma, omega,
+            1e-8, 1e-10,
+        )
+        return [S, E, I, R]
+--- End Solver ---
+Running performance test...
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /tests
+plugins: anyio-4.13.0, jaxtyping-0.3.9
+collected 3 items
+
+../tests/test_outputs.py .EE
+
+==================================== ERRORS ====================================
+____________________ ERROR at setup of test_solver_validity ____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+>       spec.loader.exec_module(solver_module)
+
+/tests/test_outputs.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+<frozen importlib._bootstrap_external>:999: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+solver.py:232: in <module>
+    _seirs_solve(0.0, 1.0, 0.99, 0.005, 0.005, 0.0, 0.3, 0.2, 0.1, 0.002, 1e-8, 1e-8)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7a363eb040e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+____________________ ERROR at setup of test_solver_speedup _____________________
+
+    @pytest.fixture(scope="module")
+    def solver_instance() -> Any:
+        """Loads the user's 'Solver' class from solver.py."""
+        if not SOLVER_PATH.exists():
+            pytest.fail(f"Solver file not found at {SOLVER_PATH}")
+    
+        spec = importlib.util.spec_from_file_location("solver", SOLVER_PATH)
+        solver_module = importlib.util.module_from_spec(spec)
+>       spec.loader.exec_module(solver_module)
+
+/tests/test_outputs.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+<frozen importlib._bootstrap_external>:999: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+solver.py:232: in <module>
+    _seirs_solve(0.0, 1.0, 0.99, 0.005, 0.005, 0.0, 0.3, 0.2, 0.1, 0.002, 1e-8, 1e-8)
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:443: in _compile_for_args
+    raise e
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:376: in _compile_for_args
+    return_val = self.compile(tuple(argtypes))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/dispatcher.py:889: in compile
+    cres = self._cache.load_overload(sig, self.targetctx)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:721: in load_overload
+    return self._load_overload(sig, target_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:728: in _load_overload
+    data = self._cache_file.load(key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:576: in load
+    return self._load_data(data_name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/caching.py:618: in _load_data
+    tup = pickle.loads(data)
+          ^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/site-packages/numba/core/environment.py:51: in _rebuild_env
+    mod = importlib.import_module(modname)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'solver', import_ = <function _gcd_import at 0x7a363eb040e0>
+
+>   ???
+E   ModuleNotFoundError: No module named 'solver'
+
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_solver_exists
+ERROR ../tests/test_outputs.py::test_solver_validity - ModuleNotFoundError: N...
+ERROR ../tests/test_outputs.py::test_solver_speedup - ModuleNotFoundError: No...
+========================= 1 passed, 2 errors in 0.70s ==========================
