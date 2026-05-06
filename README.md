@@ -2,6 +2,32 @@
 
 For adapters paper experiments (correlation study, trajectory analysis, etc.) and harbor mix selection.
 
+## Quick start for teammates
+
+```bash
+git clone https://github.com/AlienKevin/habor-mix-analyzer.git
+cd habor-mix-analyzer
+
+# one-time: install + auth Codex CLI
+npm install -g @openai/codex
+codex login
+
+# pick a chunk (1..10) and run it
+python3 analyze.py --chunks 3 -m gpt-5.4-mini --skip-done
+```
+
+The 100 tasks are split deterministically into 10 chunks of 10. Same `--num-chunks` value across teammates → same partition; coordinate by chunk number. `--skip-done` makes a chunk resumable: if a task already has all its `<trial_id>.md` files under `./results/`, that task is skipped without spending credits.
+
+Useful one-liners:
+
+```bash
+python3 analyze.py --list-tasks                # show every task and its chunk
+python3 analyze.py --chunks 3 --dry-run        # preview prompt + command, no codex calls
+python3 aggregate.py task <task_id> -m gpt-5.4-mini   # task-level rollup once trials are done
+```
+
+Per-trial reports land in `./results/<task>/<trial_id>.md` (gitignored — your runs don't conflict with teammates' commits). To share results back, copy the relevant subtree into the committed `./result/` and open a PR.
+
 ## `analyze.py` — per-trial codex auditor
 
 `analyze.py` takes a Harbor-Mix task id and spawns up to 18 `codex exec` sessions in parallel, one per trial of that task, and asks each to produce a structured failure analysis. The two data inputs ship in-repo, so a fresh `git clone` is sufficient:
