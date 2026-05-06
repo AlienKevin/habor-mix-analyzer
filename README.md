@@ -8,7 +8,11 @@ For adapters paper experiments (correlation study, trajectory analysis, etc.) an
 
 ```
 harbor-mix-trials/                                           # trial corpus (gitignored)
-├── trials_extracted/<sanitised_task>/<trial_id>/{trajectory.json,result.json}
+├── trials_extracted/<sanitised_task>/<trial_id>/
+│   ├── trajectory.json    — agent transcript (input)
+│   ├── result.json        — harbor wrapper's reward + exception (input)
+│   ├── test_stdout.txt    — verifier pytest output (backfilled, see below)
+│   └── reward.txt         — verifier reward marker (backfilled)
 └── uploaded_trials.jsonl
 
 task_dataset/                                                # canonical task source (gitignored)
@@ -25,13 +29,22 @@ task_dataset/                                                # canonical task so
 
 ```bash
 # trial corpus: get from the original distribution (out of scope for this README)
+
 # task source: sparse-clone harbor-mix/datasets only (~150 MB)
 git clone --filter=blob:none --depth=1 --sparse \
     https://github.com/harbor-framework/harbor-adapters-experiments.git task_dataset
 git -C task_dataset sparse-checkout set harbor-mix/datasets
+
+# verifier outputs (test_stdout.txt + reward.txt per trial, ~5 MB total):
+python3 backfill_test_stdout.py        # idempotent; takes ~8 min for 1777 trials
 ```
 
-The auditor prompt explicitly references the resolved task source dir for each trial (resolved via `uploaded_trials.jsonl`'s `requested_task_name` / `task_path`), and the codex session is given `--add-dir task_dataset/harbor-mix/datasets/`, so it can read the actual verifier code, oracle solution, and instruction text rather than guessing from the trajectory. Coverage on the current 1777-trial corpus: 100/100 tasks.
+The auditor prompt references, per trial:
+- the trajectory and result.json (always present),
+- the verifier's actual `test_stdout.txt` (downloaded from Supabase storage by `backfill_test_stdout.py` from `https://hnkceovsiaczvcwhdlkb.supabase.co/storage/v1/object/public/trials/<trial_id>.tar.gz`),
+- the canonical task source dir resolved via `uploaded_trials.jsonl`'s `requested_task_name`,
+
+and the codex session is given `--add-dir` for the trials root *and* the task dataset, so it can `cat` the real verifier code and oracle solution rather than guessing from the trajectory. Coverage on the current 1777-trial corpus: 100/100 tasks for source, ~100% for `test_stdout.txt` (a handful may have been pruned upstream and return 404, in which case the prompt notes the file is unavailable and the audit falls back to inferring from the trajectory).
 
 ### Usage
 

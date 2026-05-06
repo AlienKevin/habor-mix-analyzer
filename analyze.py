@@ -48,8 +48,16 @@ why the agent failed (or, if it passed, what it actually did) and whether the
 task itself is sound.
 
 Inputs (read-only — do not modify):
-- trajectory: {trajectory_path}
-- result    : {result_path}
+- trajectory  : {trajectory_path}
+- result      : {result_path}
+- test_stdout : {test_stdout_path}
+                The verifier's actual stdout (pytest output / reward gating
+                trace). Backfilled from Supabase storage. Quote it directly
+                when reasoning about failing-test evidence — do NOT
+                paraphrase or guess at the failing assertion.
+- reward.txt  : {reward_txt_path}
+                The literal "0" / "1" the verifier wrote, before any
+                downstream wrapping.
 - task source dir (canonical task definition): {task_source_dir}
   Contents (when present):
     instruction.md          — the canonical task brief; may differ from what
@@ -76,10 +84,11 @@ alternate between the agent's JSON responses (commands it issued) and the
 terminal output it observed. result.json contains the verifier reward and
 any exception.
 
-When you reason about *failing-test evidence*, *hacking risk*, or *task
-quality*, read the actual files under the task source dir above rather than
-inferring from the trajectory alone. Quote real test code, real reward
-gating, real instruction text — not what you guess the verifier checks.
+For *failing-test evidence*, the source of truth is `test_stdout` — the
+real pytest output. Quote actual lines and stack-frame paths from there.
+For *hacking risk* and *task quality*, read the files under the task
+source dir (test code, oracle, instruction). Do NOT infer the failing
+assertion from the trajectory alone when test_stdout is available.
 
 Write your analysis to `{sanitised_task_name}/{trial_id}.md` (create the
 directory as needed). Cover, in this order:
@@ -191,11 +200,19 @@ def build_prompt(template: str, *, trial_dir: Path, task_name: str,
                  sanitised_task_name: str, meta: dict) -> str:
     result_path = trial_dir / "result.json"
     trajectory_path = trial_dir / "trajectory.json"
+    test_stdout_path = trial_dir / "test_stdout.txt"
+    reward_txt_path = trial_dir / "reward.txt"
+    if not test_stdout_path.exists():
+        test_stdout_path = "(not available for this trial — Supabase tarball missing or never had a verifier/test-stdout.txt)"
+    if not reward_txt_path.exists():
+        reward_txt_path = "(not available)"
     src = resolve_task_source(meta)
     task_source_dir = str(src) if src else "(not available — task source not found in task_dataset/)"
     return template.format(
         trajectory_path=trajectory_path,
         result_path=result_path,
+        test_stdout_path=test_stdout_path,
+        reward_txt_path=reward_txt_path,
         task_source_dir=task_source_dir,
         task_name=task_name,
         sanitised_task_name=sanitised_task_name,
