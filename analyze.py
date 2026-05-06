@@ -166,6 +166,8 @@ async def run_one(job: TrialJob, *, model: str, timeout_sec: int,
     started = time.time()
     log = {
         "trial_id": job.trial_id,
+        "model": job.metadata.get("model"),
+        "agent": job.metadata.get("agent"),
         "output_md": str(job.output_md),
         "started_at": started,
         "duration_sec": None,
