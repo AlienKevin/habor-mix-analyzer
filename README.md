@@ -13,8 +13,10 @@ npm install -g @openai/codex
 codex login
 
 # pick a chunk (1..10) and run it
-python3 analyze.py --chunks 3 -m gpt-5.4-mini --skip-done
+python3 analyze.py --chunks 3 --skip-done
 ```
+
+Default model is `gpt-5.5` with reasoning effort `high` — same on every teammate's machine, no `~/.codex/config.toml` editing required. Override with `-m <model>` and/or `--reasoning-effort {minimal,low,medium,high,xhigh}`.
 
 The 100 tasks are split deterministically into 10 chunks of 10. Same `--num-chunks` value across teammates → same partition; coordinate by chunk number. `--skip-done` makes a chunk resumable: if a task already has all its `<trial_id>.md` files under `./results/`, that task is skipped without spending credits.
 
@@ -23,7 +25,7 @@ Useful one-liners:
 ```bash
 python3 analyze.py --list-tasks                # show every task and its chunk
 python3 analyze.py --chunks 3 --dry-run        # preview prompt + command, no codex calls
-python3 aggregate.py task <task_id> -m gpt-5.4-mini   # task-level rollup once trials are done
+python3 aggregate.py task <task_id>            # task-level rollup once trials are done
 ```
 
 Per-trial reports land in `./results/<task>/<trial_id>.md` (gitignored — your runs don't conflict with teammates' commits). To share results back, copy the relevant subtree into the committed `./result/` and open a PR.

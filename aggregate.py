@@ -183,8 +183,8 @@ class CodexJob:
     log_path: Path
 
 
-async def run_codex(job: CodexJob, *, codex_model: str, timeout_sec: int,
-                    sem: asyncio.Semaphore, dry_run: bool) -> dict:
+async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
+                    timeout_sec: int, sem: asyncio.Semaphore, dry_run: bool) -> dict:
     started = time.time()
     rec = {
         "name": job.name,
@@ -205,8 +205,10 @@ async def run_codex(job: CodexJob, *, codex_model: str, timeout_sec: int,
         "--dangerously-bypass-approvals-and-sandbox",
         "-C", str(job.cwd),
         "-m", codex_model,
-        job.prompt,
     ]
+    if reasoning_effort:
+        cmd += ["-c", f"model_reasoning_effort={reasoning_effort}"]
+    cmd.append(job.prompt)
     job.log_path.parent.mkdir(parents=True, exist_ok=True)
     job.cwd.mkdir(parents=True, exist_ok=True)
 
@@ -284,7 +286,7 @@ async def cmd_task(args, idx: list[TrialReport]) -> int:
         return 0
 
     sem = asyncio.Semaphore(1)
-    rec = await run_codex(job, codex_model=args.model,
+    rec = await run_codex(job, codex_model=args.model, reasoning_effort=args.reasoning_effort,
                           timeout_sec=args.timeout_sec, sem=sem, dry_run=False)
     print(f"finished in {rec['duration_sec']}s, exit={rec['exit_code']}, "
           f"wrote_output={rec['wrote_output']}")
@@ -354,7 +356,7 @@ async def cmd_dimension(args, idx: list[TrialReport],
     sem = asyncio.Semaphore(min(args.max_parallel, len(extract_jobs)))
     started = time.time()
     extract_recs = await asyncio.gather(*(
-        run_codex(j, codex_model=args.model, timeout_sec=args.timeout_sec,
+        run_codex(j, codex_model=args.model, reasoning_effort=args.reasoning_effort, timeout_sec=args.timeout_sec,
                   sem=sem, dry_run=False)
         for j in extract_jobs
     ))
@@ -385,7 +387,7 @@ async def cmd_dimension(args, idx: list[TrialReport],
     )
     sem1 = asyncio.Semaphore(1)
     started = time.time()
-    rec = await run_codex(rollup_job, codex_model=args.model,
+    rec = await run_codex(rollup_job, codex_model=args.model, reasoning_effort=args.reasoning_effort,
                           timeout_sec=args.timeout_sec, sem=sem1, dry_run=False)
     rollup_wall = round(time.time() - started, 2)
     print(f"  rollup : exit={rec['exit_code']} wrote={rec['wrote_output']} "
@@ -407,6 +409,11 @@ def make_parser() -> argparse.ArgumentParser:
                         help="project root where aggregation/* dirs are created (default: cwd)")
     common.add_argument("-m", "--model", default=DEFAULT_MODEL,
                         help="codex model (default: gpt-5.5)")
+    common.add_argument("--reasoning-effort", default="high",
+                        choices=["", "minimal", "low", "medium", "high", "xhigh"],
+                        help="codex reasoning effort, passed via -c "
+                             "model_reasoning_effort=<value>. Default 'high'. "
+                             "Pass empty string to inherit from ~/.codex/config.toml.")
     common.add_argument("-t", "--timeout-sec", type=int, default=DEFAULT_TIMEOUT)
     common.add_argument("-j", "--max-parallel", type=int, default=DEFAULT_PARALLEL,
                         help="max concurrent extractions (default: 18)")

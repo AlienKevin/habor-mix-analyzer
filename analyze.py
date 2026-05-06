@@ -206,8 +206,8 @@ def build_prompt(template: str, *, trial_dir: Path, task_name: str,
     )
 
 
-async def run_one(job: TrialJob, *, model: str, timeout_sec: int,
-                  semaphore: asyncio.Semaphore, dry_run: bool) -> dict:
+async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
+                  timeout_sec: int, semaphore: asyncio.Semaphore, dry_run: bool) -> dict:
     started = time.time()
     log = {
         "trial_id": job.trial_id,
@@ -232,6 +232,8 @@ async def run_one(job: TrialJob, *, model: str, timeout_sec: int,
         "-C", str(job.cwd),
         "-m", model,
     ]
+    if reasoning_effort:
+        cmd += ["-c", f"model_reasoning_effort={reasoning_effort}"]
     for d in job.add_dirs:
         cmd += ["--add-dir", str(d)]
     cmd.append(job.prompt)
@@ -329,7 +331,7 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
     print(f"trials   : {len(jobs)}")
     print(f"out_root : {out_root}")
     print(f"parallel : {min(args.max_parallel, len(jobs))}")
-    print(f"model    : {args.model}")
+    print(f"model    : {args.model}  (reasoning={args.reasoning_effort or 'inherited'})")
     print(f"timeout  : {args.timeout_sec}s per trial")
 
     if args.dry_run:
@@ -341,6 +343,8 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
                         "--dangerously-bypass-approvals-and-sandbox",
                         "-C", str(sample.cwd),
                         "-m", args.model]
+        if args.reasoning_effort:
+            cmd_preview += ["-c", f"model_reasoning_effort={args.reasoning_effort}"]
         for d in sample.add_dirs:
             cmd_preview += ["--add-dir", str(d)]
         cmd_preview.append("<prompt>")
@@ -349,7 +353,8 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
 
     sem = asyncio.Semaphore(min(args.max_parallel, len(jobs)))
     started_at = time.time()
-    coros = [run_one(j, model=args.model, timeout_sec=args.timeout_sec,
+    coros = [run_one(j, model=args.model, reasoning_effort=args.reasoning_effort,
+                      timeout_sec=args.timeout_sec,
                       semaphore=sem, dry_run=args.dry_run) for j in jobs]
     results = await asyncio.gather(*coros, return_exceptions=False)
     total = round(time.time() - started_at, 2)
@@ -515,6 +520,11 @@ def main() -> int:
     ap.add_argument("-j", "--max-parallel", type=int, default=18,
                     help="concurrent trials per task (default: 18)")
     ap.add_argument("-m", "--model", default="gpt-5.5")
+    ap.add_argument("--reasoning-effort", default="high",
+                    choices=["", "minimal", "low", "medium", "high", "xhigh"],
+                    help="codex reasoning effort, passed via -c "
+                         "model_reasoning_effort=<value>. Default 'high'. "
+                         "Pass empty string to inherit from ~/.codex/config.toml.")
     ap.add_argument("-t", "--timeout-sec", type=int, default=1800)
     ap.add_argument("--prompt-file", help="override the default prompt template")
 
