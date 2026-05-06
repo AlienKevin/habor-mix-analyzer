@@ -513,7 +513,7 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
         jobs.append(TrialJob(
             trial_id=tdir.name,
             trial_dir=tdir,
-            output_md=task_out / f"{tdir.name}.md",
+            output_md=task_out / f"{tdir.name}.json",
             log_path=log_dir / f"{tdir.name}.log",
             prompt=prompt,
             cwd=out_root,
@@ -638,7 +638,7 @@ def is_task_done(task_id: str, out_root: Path) -> bool:
     out_dir = out_root / sanitised
     if not out_dir.is_dir():
         return False
-    actual = {p.stem for p in out_dir.glob("*.md")}
+    actual = {p.stem for p in out_dir.glob("*.json") if p.name != "_run.json"}
     return expected.issubset(actual)
 
 
