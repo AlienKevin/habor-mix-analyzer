@@ -32,11 +32,10 @@ Defaults: `-j 18`, `-m gpt-5.5`, `-t 1800`, `-o ./results`. Codex runs with `--d
 ### Outputs
 
 ```
-<OUT_ROOT>/
-├── result/<sanitised_task>/<trial_id>.md   ← per-trial codex reports (7 sections each)
-└── <sanitised_task>/
-    ├── _logs/<trial_id>.log                ← raw codex stdout/stderr
-    └── _run.json                           ← summary (durations, exit codes, wrote_output flags)
+<OUT_ROOT>/<sanitised_task>/
+├── <trial_id>.md            ← per-trial codex reports (7 sections each)
+├── _run.json                ← summary (durations, exit codes, wrote_output flags)
+└── _logs/<trial_id>.log     ← raw codex stdout/stderr
 ```
 
 The default prompt asks each session for: task summary → closeness to success → surface failure → root cause → failing-test evidence (with quoted snippets) → cheating/hacking risk → task-quality verdict. Override the template with `--prompt-file path/to/prompt.txt`; placeholders are `{trajectory_path}`, `{result_path}`, `{task_name}`, `{sanitised_task_name}`, `{trial_id}`, `{model}`, `{agent}`, `{reward}`, `{exception}`.
@@ -47,10 +46,10 @@ The default prompt asks each session for: task summary → closeness to success 
 
 ## Example audit: `bigcodebench/bigcodebench_657`
 
-A full run (18 trials, ~270 s wall time on `gpt-5.5`) is committed under `runs/bigcodebench_657/`:
+A full run (18 trials, ~270 s wall time on `gpt-5.5`) is committed under [`result/bigcodebench-bigcodebench_657/`](result/bigcodebench-bigcodebench_657/):
 
-- `runs/bigcodebench_657/result/bigcodebench-bigcodebench_657/<trial_id>.md` — 18 per-trial reports.
-- `runs/bigcodebench_657/_run.json` — orchestrator summary.
+- `result/bigcodebench-bigcodebench_657/<trial_id>.md` — 18 per-trial reports.
+- `result/bigcodebench-bigcodebench_657/_run.json` — orchestrator summary.
 - [`analyses/bigcodebench_657.md`](analyses/bigcodebench_657.md) — synthesised four-question writeup over those 18 reports (closeness to success, model/agent variance with surface-vs-root-cause split, concrete failing behaviours with test snippets, hacking-risk audit, task-quality verdict).
 
 Headline finding: 16 of 18 cells fail the same hidden test (`test_case_3` with `texts=[]`), with identical root cause across 9 models × 5 harnesses — premature `task_complete` after a single happy-path smoke test, no probing of edge cases. Most-damning trace is `gemini-3.1-pro-preview + gemini-cli`, which observed `RuntimeError: you must first build vocabulary before training the model` live during its own self-test and shipped anyway after a syntax-only `py_compile` check.

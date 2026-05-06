@@ -1,6 +1,6 @@
 # `bigcodebench/bigcodebench_657` — failure-mode synthesis over 18 trials
 
-Synthesised from the 18 per-trial codex audits at [`../runs/bigcodebench_657/result/bigcodebench-bigcodebench_657/`](../runs/bigcodebench_657/result/bigcodebench-bigcodebench_657/). Picked because the cell is unusually clean: 18 distinct `(model, agent)` rows, all `reward=0.0`, all `exception_type=None` — pure agent-reasoning failures with no infrastructure noise.
+Synthesised from the 18 per-trial codex audits at [`../result/bigcodebench-bigcodebench_657/`](../result/bigcodebench-bigcodebench_657/). Picked because the cell is unusually clean: 18 distinct `(model, agent)` rows, all `reward=0.0`, all `exception_type=None` — pure agent-reasoning failures with no infrastructure noise.
 
 ## The task
 

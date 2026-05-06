@@ -60,8 +60,8 @@ alternate between the agent's JSON responses (commands it issued) and the
 terminal output it observed. result.json contains the verifier reward, any
 exception, and the test stdout when present.
 
-Write your analysis to `result/{sanitised_task_name}/{trial_id}.md` (create
-directories as needed). Cover, in this order:
+Write your analysis to `{sanitised_task_name}/{trial_id}.md` (create the
+directory as needed). Cover, in this order:
 
 1. Task summary — restate the instruction the agent saw (1-2 sentences) plus
    any environment hints visible in the trajectory.
@@ -263,13 +263,13 @@ async def main_async(args: argparse.Namespace) -> int:
             sanitised_task_name=sanitised,
             meta=meta,
         )
-        # Codex runs from out_root so its writes to "result/..." land
-        # alongside our chosen tree. We separately allow access to the trials
+        # Codex runs from out_root so its relative writes land alongside
+        # _run.json and _logs/. We separately allow access to the trials
         # directory via --add-dir.
         jobs.append(TrialJob(
             trial_id=tdir.name,
             trial_dir=tdir,
-            output_md=out_root / "result" / sanitised / f"{tdir.name}.md",
+            output_md=task_out / f"{tdir.name}.md",
             log_path=log_dir / f"{tdir.name}.log",
             prompt=prompt,
             cwd=out_root,
