@@ -49,8 +49,13 @@ task itself is sound.
 
 Inputs (read-only — do not modify):
 - trajectory  : {trajectory_path}
+                The agent's full transcript: the task description it received, the
+                commands it issued, and the terminal output it observed.
 - result      : {result_path}
+                Harbor wrapper's per-trial summary: final reward, any infrastructure
+                exception, timing breakdown.
 - test_stdout : {test_stdout_path}
+                The verifier's actual stdout (e.g. pytest output) from the trial run.
 - reward.txt  : {reward_txt_path}
 - task source dir (canonical task definition): {task_source_dir}
   Contents (when present):
