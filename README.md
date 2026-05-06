@@ -17,9 +17,15 @@ harbor-mix-trials/
 ### Usage
 
 ```bash
-# from the project root
+# single task — original interface, still supported
 python3 analyze.py <task_id> [-o OUT_ROOT] [-j MAX_PARALLEL] [-m MODEL] [-t TIMEOUT_SEC]
                              [--prompt-file PATH] [--dry-run]
+
+# many tasks via chunked work-sharing (see "Splitting work across teammates" below)
+python3 analyze.py --chunks 2,5 [--num-chunks 10] [--skip-done] [other flags]
+
+# enumerate the chunk assignment without running anything
+python3 analyze.py --list-tasks [--num-chunks 10]
 ```
 
 `task_id` accepts either form:
@@ -27,7 +33,28 @@ python3 analyze.py <task_id> [-o OUT_ROOT] [-j MAX_PARALLEL] [-m MODEL] [-t TIME
 - sanitised dir name: `bigcodebench-bigcodebench_657`
 - canonical name with slash: `bigcodebench/bigcodebench_657`
 
-Defaults: `-j 18`, `-m gpt-5.5`, `-t 1800`, `-o ./results`. Codex runs with `--dangerously-bypass-approvals-and-sandbox` (workspace-write fails under bubblewrap in the dev env), so the sessions can also explore the host filesystem to pick up packaged test sources (e.g. `/data/packaged/harbor-datasets/.../tests/test_outputs.py`) and quote them in the report.
+Defaults: `-j 18`, `-m gpt-5.5`, `-t 1800`, `-o ./results`, `--num-chunks 10`. Codex runs with `--dangerously-bypass-approvals-and-sandbox` (workspace-write fails under bubblewrap in the dev env), so the sessions can also explore the host filesystem to pick up packaged test sources (e.g. `/data/packaged/harbor-datasets/.../tests/test_outputs.py`) and quote them in the report.
+
+### Splitting work across teammates
+
+`analyze.py` deterministically splits the full task list (every directory under `harbor-mix-trials/trials_extracted/`) into `--num-chunks` contiguous slices, sorted alphabetically. The same `--num-chunks` value on different machines yields the same chunk membership, so teammates can divide Codex spend by claiming chunks:
+
+```bash
+# teammate A
+python3 analyze.py --chunks 1,2,3 --skip-done
+
+# teammate B
+python3 analyze.py --chunks 4,5,6 --skip-done
+
+# teammate C
+python3 analyze.py --chunks 7,8,9,10 --skip-done
+```
+
+`--list-tasks` prints `chunk <id>  <task_name>` for every task so a teammate can verify what they'll run before spending credits.
+
+`--skip-done` checks `<out-root>/<task>/` for a `<trial_id>.md` per trial and skips the task if all are present. This makes a partially-completed run resumable: re-run the same command and it picks up where it left off. (Failed trials still re-run because their `.md` is missing.)
+
+Within a chunk, tasks run sequentially; each task still runs its 18 trials in parallel up to `-j`. Approximate wall time per task is 3-6 minutes on `gpt-5.5`, so a 10-task chunk takes roughly 30-60 minutes.
 
 ### Outputs
 

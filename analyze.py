@@ -224,8 +224,9 @@ async def run_one(job: TrialJob, *, model: str, timeout_sec: int,
 # Orchestrator
 # ----------------------------------------------------------------------------- #
 
-async def main_async(args: argparse.Namespace) -> int:
-    task_dir = resolve_task_dir(args.task_id)
+async def process_task(task_id: str, args: argparse.Namespace) -> int:
+    """Audit one task. Returns 0 on success, non-zero if any trial errored."""
+    task_dir = resolve_task_dir(task_id)
     sanitised = task_dir.name
     trial_dirs = list_trials(task_dir)
     if not trial_dirs:
@@ -327,25 +328,164 @@ async def main_async(args: argparse.Namespace) -> int:
         print(f"  ! {summary['n_errors']} trials had non-zero exit codes — see {log_dir}")
     print(f"summary -> {task_out / '_run.json'}")
 
-    if not args.keep_logs and summary["n_errors"] == 0:
-        # keep the logs anyway — they're cheap; honouring --keep-logs only as opt-in for now
-        pass
     return 0 if summary["n_errors"] == 0 else 1
+
+
+# ----------------------------------------------------------------------------- #
+# Chunking — split task list into N chunks for parallel teammate work
+# ----------------------------------------------------------------------------- #
+
+def list_all_tasks() -> list[str]:
+    """Sanitised task names under TRIALS_ROOT, sorted for deterministic chunking."""
+    if not TRIALS_ROOT.is_dir():
+        raise SystemExit(f"trials root not found: {TRIALS_ROOT}")
+    return sorted(p.name for p in TRIALS_ROOT.iterdir() if p.is_dir())
+
+
+def chunk_assignment(num_chunks: int, tasks: Optional[list[str]] = None
+                     ) -> list[tuple[int, str]]:
+    """Return [(chunk_id_1based, task_name), ...] for every task.
+
+    Sorted task list is contiguous-sliced into `num_chunks` pieces of size
+    ceil(N/num_chunks). Last chunk may be slightly shorter.
+    """
+    import math
+    if num_chunks < 1:
+        raise SystemExit("--num-chunks must be >= 1")
+    if tasks is None:
+        tasks = list_all_tasks()
+    n = len(tasks)
+    if n == 0:
+        return []
+    chunk_size = math.ceil(n / num_chunks)
+    return [((i // chunk_size) + 1, t) for i, t in enumerate(tasks)]
+
+
+def parse_chunk_spec(spec: str, num_chunks: int) -> set[int]:
+    """Parse '1,3,5' (1-indexed) into {1,3,5}; reject out-of-range ids."""
+    ids: set[int] = set()
+    for tok in spec.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            cid = int(tok)
+        except ValueError:
+            raise SystemExit(f"chunk id is not an integer: {tok!r}")
+        if not (1 <= cid <= num_chunks):
+            raise SystemExit(f"chunk id {cid} out of range [1, {num_chunks}]")
+        ids.add(cid)
+    if not ids:
+        raise SystemExit("--chunks: empty selection")
+    return ids
+
+
+def is_task_done(task_id: str, out_root: Path) -> bool:
+    """All of this task's trials have a corresponding <trial_id>.md output."""
+    sanitised = task_id.replace("/", "_")
+    task_dir = TRIALS_ROOT / sanitised
+    if not task_dir.is_dir():
+        return False
+    expected = {p.name for p in task_dir.iterdir() if p.is_dir()}
+    if not expected:
+        return False
+    out_dir = out_root / sanitised
+    if not out_dir.is_dir():
+        return False
+    actual = {p.stem for p in out_dir.glob("*.md")}
+    return expected.issubset(actual)
+
+
+# ----------------------------------------------------------------------------- #
+# Entry
+# ----------------------------------------------------------------------------- #
+
+async def main_async(args: argparse.Namespace) -> int:
+    if args.list_tasks:
+        for cid, t in chunk_assignment(args.num_chunks):
+            print(f"chunk {cid:>3}  {t}")
+        return 0
+
+    # Decide which tasks to run.
+    if args.chunks:
+        if args.task_id:
+            print("warning: --chunks given; positional task_id is ignored",
+                  file=sys.stderr)
+        chunk_ids = parse_chunk_spec(args.chunks, args.num_chunks)
+        assignment = chunk_assignment(args.num_chunks)
+        tasks = [t for cid, t in assignment if cid in chunk_ids]
+        if not tasks:
+            print(f"no tasks matched chunks {sorted(chunk_ids)}", file=sys.stderr)
+            return 2
+    elif args.task_id:
+        tasks = [args.task_id]
+    else:
+        print("provide a positional <task_id>, or --chunks SPEC, or --list-tasks",
+              file=sys.stderr)
+        return 2
+
+    out_root = Path(args.out_root).resolve()
+    n = len(tasks)
+    print(f"running {n} task(s)" + (f" (chunks {sorted(chunk_ids)} "
+          f"of {args.num_chunks})" if args.chunks else ""))
+
+    rc_total = 0
+    skipped: list[str] = []
+    completed: list[tuple[str, int]] = []
+
+    for i, t in enumerate(tasks, 1):
+        print(f"\n[{i}/{n}] {t}")
+        if args.skip_done and is_task_done(t, out_root):
+            print("  skipping: all per-trial outputs present")
+            skipped.append(t)
+            continue
+        rc = await process_task(t, args)
+        completed.append((t, rc))
+        if rc != 0:
+            rc_total = rc
+
+    if n > 1:
+        print(f"\n=== chunk summary ===")
+        print(f"completed: {len(completed)} / {n}  "
+              f"({sum(1 for _, rc in completed if rc == 0)} clean, "
+              f"{sum(1 for _, rc in completed if rc != 0)} with errors)")
+        if skipped:
+            print(f"skipped  : {len(skipped)}  (use --no-skip-done to re-run)")
+        bad = [t for t, rc in completed if rc != 0]
+        if bad:
+            print("errors in: " + ", ".join(bad))
+
+    return rc_total
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("task_id")
+    ap.add_argument("task_id", nargs="?",
+                    help="single task id (sanitised dir name or canonical with /). "
+                         "Omit when using --chunks or --list-tasks.")
     ap.add_argument("-o", "--out-root", default="./results",
-                    help="root for the per-trial markdown tree (default: ./results, "
-                         "i.e. /data/trial-codex-analyze/results when run from the project dir)")
-    ap.add_argument("-j", "--max-parallel", type=int, default=18)
+                    help="root for the per-trial markdown tree (default: ./results)")
+    ap.add_argument("-j", "--max-parallel", type=int, default=18,
+                    help="concurrent trials per task (default: 18)")
     ap.add_argument("-m", "--model", default="gpt-5.5")
     ap.add_argument("-t", "--timeout-sec", type=int, default=1800)
     ap.add_argument("--prompt-file", help="override the default prompt template")
+
+    ap.add_argument("--chunks", metavar="SPEC",
+                    help="run a comma-separated subset of chunks (1-indexed), "
+                         "e.g. --chunks 1,3,7. Chunks are deterministic across "
+                         "teammates so two people with the same SPEC do the "
+                         "same tasks.")
+    ap.add_argument("--num-chunks", type=int, default=10,
+                    help="how many chunks the full task list is split into "
+                         "(default: 10). Must match across teammates.")
+    ap.add_argument("--list-tasks", action="store_true",
+                    help="print every task's chunk assignment and exit")
+    ap.add_argument("--skip-done", action="store_true",
+                    help="skip a task if every trial already has a "
+                         "<trial_id>.md under <out-root>/<task>/")
+
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--keep-logs", action="store_true",
-                    help="(reserved) currently logs are always kept")
     args = ap.parse_args()
     return asyncio.run(main_async(args))
 
