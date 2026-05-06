@@ -51,13 +51,7 @@ Inputs (read-only — do not modify):
 - trajectory  : {trajectory_path}
 - result      : {result_path}
 - test_stdout : {test_stdout_path}
-                The verifier's actual stdout (pytest output / reward gating
-                trace). Backfilled from Supabase storage. Quote it directly
-                when reasoning about failing-test evidence — do NOT
-                paraphrase or guess at the failing assertion.
 - reward.txt  : {reward_txt_path}
-                The literal "0" / "1" the verifier wrote, before any
-                downstream wrapping.
 - task source dir (canonical task definition): {task_source_dir}
   Contents (when present):
     instruction.md          — the canonical task brief; may differ from what
@@ -77,18 +71,6 @@ Trial metadata
 - agent     : {agent}
 - reward    : {reward}
 - exception : {exception}
-
-Read trajectory.json carefully. Step 1 (source=user) contains the system
-prompt + the literal Task Description the agent received. Subsequent steps
-alternate between the agent's JSON responses (commands it issued) and the
-terminal output it observed. result.json contains the verifier reward and
-any exception.
-
-For *failing-test evidence*, the source of truth is `test_stdout` — the
-real pytest output. Quote actual lines and stack-frame paths from there.
-For *hacking risk* and *task quality*, read the files under the task
-source dir (test code, oracle, instruction). Do NOT infer the failing
-assertion from the trajectory alone when test_stdout is available.
 
 Write your analysis to `{sanitised_task_name}/{trial_id}.md` (create the
 directory as needed). Cover, in this order:
