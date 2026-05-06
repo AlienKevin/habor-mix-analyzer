@@ -16,7 +16,7 @@ codex login
 python3 analyze.py --chunks 3 --skip-done
 ```
 
-Default model is `gpt-5.4-mini` with reasoning effort `high`, routed through `codex exec`. Override with `-m <model>` (e.g. `claude-opus-4-7` for top quality, routed through the `claude` CLI) and/or `--reasoning-effort {minimal,low,medium,high,xhigh,max}`.
+Default model is `gpt-5.4-mini` with reasoning effort `high`, routed through `codex exec`. Override with `-m <model>` (e.g. `claude-opus-4-7`, routed through the `claude` CLI) and/or `--reasoning-effort {minimal,low,medium,high,xhigh,max}`.
 
 **Backend routing.** Model names starting with `claude` (or the aliases `opus`/`sonnet`/`haiku`) route through the `claude` CLI (Claude Code); everything else routes through `codex exec`. Examples:
 
