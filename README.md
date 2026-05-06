@@ -23,7 +23,7 @@ Default model is `gpt-5.4-mini` with reasoning effort `high`, routed through `co
 ```bash
 python3 analyze.py --chunks 3                       # → codex exec -m gpt-5.4-mini (default)
 python3 analyze.py --chunks 3 -m gpt-5.5            # → codex exec ...
-python3 analyze.py --chunks 3 -m claude-opus-4-7    # → claude -p (top quality, slower)
+python3 analyze.py --chunks 3 -m claude-opus-4-7    # → claude -p
 python3 analyze.py --chunks 3 -m claude-sonnet-4-6  # cheaper claude
 python3 analyze.py --chunks 3 -m sonnet             # alias also works
 ```
