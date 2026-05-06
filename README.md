@@ -16,18 +16,19 @@ codex login
 python3 analyze.py --chunks 3 --skip-done
 ```
 
-Default model is `gpt-5.5` with reasoning effort `high` — same on every teammate's machine, no `~/.codex/config.toml` editing required. Override with `-m <model>` and/or `--reasoning-effort {minimal,low,medium,high,xhigh,max}`.
+Default model is `claude-opus-4-7` with reasoning effort `high`, routed through the `claude` CLI. Override with `-m <model>` and/or `--reasoning-effort {minimal,low,medium,high,xhigh,max}`.
 
-**Backend routing.** Model names starting with `claude` (or the aliases `opus`/`sonnet`/`haiku`) route through the `claude` CLI (Claude Code) instead of `codex exec`; everything else routes through codex. Examples:
+**Backend routing.** Model names starting with `claude` (or the aliases `opus`/`sonnet`/`haiku`) route through the `claude` CLI (Claude Code); everything else routes through `codex exec`. Examples:
 
 ```bash
-python3 analyze.py --chunks 3 -m claude-opus-4-7        # → claude -p --effort high ...
-python3 analyze.py --chunks 3 -m claude-sonnet-4-6      # → claude -p ...
-python3 analyze.py --chunks 3 -m sonnet                 # alias also works
-python3 analyze.py --chunks 3 -m gpt-5.5                # → codex exec ... (default)
+python3 analyze.py --chunks 3                       # → claude -p --model claude-opus-4-7 (default)
+python3 analyze.py --chunks 3 -m claude-sonnet-4-6  # cheaper claude
+python3 analyze.py --chunks 3 -m sonnet             # alias also works
+python3 analyze.py --chunks 3 -m gpt-5.5            # → codex exec ...
+python3 analyze.py --chunks 3 -m gpt-5.4-mini       # → codex exec ...
 ```
 
-For claude routing, set `ANTHROPIC_API_KEY` (or use `claude login` first). Note that `--reasoning-effort minimal` is codex-only and `max` is claude-only — pass a value that matches your chosen backend.
+For claude routing, run `claude login` once or set `ANTHROPIC_API_KEY`. For codex routing, run `codex login` once. Note: `--reasoning-effort minimal` is codex-only and `max` is claude-only — pass a value that matches your chosen backend.
 
 The 100 tasks are split deterministically into 10 chunks of 10. Same `--num-chunks` value across teammates → same partition; coordinate by chunk number. `--skip-done` makes a chunk resumable: if a task already has all its `<trial_id>.md` files under `./results/`, that task is skipped without spending credits.
 

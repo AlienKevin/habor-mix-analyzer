@@ -43,7 +43,7 @@ from typing import Optional
 
 DEFAULT_BASE = "./result"
 DEFAULT_OUT = "./"
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = "claude-opus-4-7"
 DEFAULT_TIMEOUT = 1800
 DEFAULT_PARALLEL = 18
 
@@ -448,7 +448,8 @@ def make_parser() -> argparse.ArgumentParser:
                         help="model to drive aggregation. Names starting with "
                              "'claude' (or 'opus'/'sonnet'/'haiku') route "
                              "through the `claude` CLI; everything else "
-                             "routes through `codex exec`. Default: gpt-5.5.")
+                             "routes through `codex exec`. Default: "
+                             f"{DEFAULT_MODEL}.")
     common.add_argument("--reasoning-effort", default="high",
                         choices=["", "minimal", "low", "medium", "high", "xhigh", "max"],
                         help="reasoning effort. For codex passed as "
