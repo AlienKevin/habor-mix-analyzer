@@ -226,7 +226,7 @@ file.
     "evidence_quote": "verbatim command + observation with step number, OR a verbatim line from test_stdout.txt"
   }},
   "root_cause": {{
-    "category": "freeform short label naming the deeper failure mode (e.g. 'declared task_complete after one happy-path test', 'over-included Port Hedland', 'never inspected /tests/'). Coin whatever phrase fits — DO NOT pick from a fixed enum.",
+    "category": "freeform short label naming the deeper failure mode",
     "summary": "the deeper reason in 1-3 sentences",
     "evidence_quote": "verbatim agent reasoning or action that demonstrates the root cause"
   }},
