@@ -183,6 +183,39 @@ class CodexJob:
     log_path: Path
 
 
+def is_claude_model(model: str) -> bool:
+    m = model.lower().strip()
+    return m.startswith("claude") or m in ("opus", "sonnet", "haiku")
+
+
+def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
+                      add_dirs: list[Path], prompt: str
+                      ) -> tuple[list[str], dict]:
+    """Return (argv, subprocess_kwargs). Routes to codex or claude based on model."""
+    if is_claude_model(model):
+        cmd = ["claude", "-p",
+               "--model", model,
+               "--dangerously-skip-permissions",
+               "--output-format", "text"]
+        if reasoning_effort:
+            cmd += ["--effort", reasoning_effort]
+        for d in add_dirs:
+            cmd += ["--add-dir", str(d)]
+        cmd.append(prompt)
+        return cmd, {"cwd": str(cwd)}
+    cmd = ["codex", "exec",
+           "--skip-git-repo-check",
+           "--dangerously-bypass-approvals-and-sandbox",
+           "-C", str(cwd),
+           "-m", model]
+    if reasoning_effort:
+        cmd += ["-c", f"model_reasoning_effort={reasoning_effort}"]
+    for d in add_dirs:
+        cmd += ["--add-dir", str(d)]
+    cmd.append(prompt)
+    return cmd, {}
+
+
 async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
                     timeout_sec: int, sem: asyncio.Semaphore, dry_run: bool) -> dict:
     started = time.time()
@@ -199,16 +232,10 @@ async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
         rec["dry_run"] = True
         return rec
 
-    cmd = [
-        "codex", "exec",
-        "--skip-git-repo-check",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "-C", str(job.cwd),
-        "-m", codex_model,
-    ]
-    if reasoning_effort:
-        cmd += ["-c", f"model_reasoning_effort={reasoning_effort}"]
-    cmd.append(job.prompt)
+    cmd, popen_kwargs = build_session_cmd(
+        model=codex_model, reasoning_effort=reasoning_effort,
+        cwd=job.cwd, add_dirs=[], prompt=job.prompt,
+    )
     job.log_path.parent.mkdir(parents=True, exist_ok=True)
     job.cwd.mkdir(parents=True, exist_ok=True)
 
@@ -220,6 +247,7 @@ async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
                     stdout=logfh,
                     stderr=asyncio.subprocess.STDOUT,
                     stdin=asyncio.subprocess.DEVNULL,
+                    **popen_kwargs,
                 )
                 try:
                     rc = await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
@@ -408,12 +436,15 @@ def make_parser() -> argparse.ArgumentParser:
     common.add_argument("--out", default=DEFAULT_OUT,
                         help="project root where aggregation/* dirs are created (default: cwd)")
     common.add_argument("-m", "--model", default=DEFAULT_MODEL,
-                        help="codex model (default: gpt-5.5)")
+                        help="model to drive aggregation. Names starting with "
+                             "'claude' (or 'opus'/'sonnet'/'haiku') route "
+                             "through the `claude` CLI; everything else "
+                             "routes through `codex exec`. Default: gpt-5.5.")
     common.add_argument("--reasoning-effort", default="high",
-                        choices=["", "minimal", "low", "medium", "high", "xhigh"],
-                        help="codex reasoning effort, passed via -c "
-                             "model_reasoning_effort=<value>. Default 'high'. "
-                             "Pass empty string to inherit from ~/.codex/config.toml.")
+                        choices=["", "minimal", "low", "medium", "high", "xhigh", "max"],
+                        help="reasoning effort. For codex passed as "
+                             "-c model_reasoning_effort=<v>; for claude as "
+                             "--effort <v>. Default 'high'.")
     common.add_argument("-t", "--timeout-sec", type=int, default=DEFAULT_TIMEOUT)
     common.add_argument("-j", "--max-parallel", type=int, default=DEFAULT_PARALLEL,
                         help="max concurrent extractions (default: 18)")

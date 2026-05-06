@@ -206,6 +206,40 @@ def build_prompt(template: str, *, trial_dir: Path, task_name: str,
     )
 
 
+def is_claude_model(model: str) -> bool:
+    """Route to `claude` CLI for any model name that looks Anthropic-shaped."""
+    m = model.lower().strip()
+    return m.startswith("claude") or m in ("opus", "sonnet", "haiku")
+
+
+def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
+                      add_dirs: list[Path], prompt: str
+                      ) -> tuple[list[str], dict]:
+    """Return (argv, subprocess_kwargs). Routes to codex or claude based on model."""
+    if is_claude_model(model):
+        cmd = ["claude", "-p",
+               "--model", model,
+               "--dangerously-skip-permissions",
+               "--output-format", "text"]
+        if reasoning_effort:
+            cmd += ["--effort", reasoning_effort]
+        for d in add_dirs:
+            cmd += ["--add-dir", str(d)]
+        cmd.append(prompt)
+        return cmd, {"cwd": str(cwd)}
+    cmd = ["codex", "exec",
+           "--skip-git-repo-check",
+           "--dangerously-bypass-approvals-and-sandbox",
+           "-C", str(cwd),
+           "-m", model]
+    if reasoning_effort:
+        cmd += ["-c", f"model_reasoning_effort={reasoning_effort}"]
+    for d in add_dirs:
+        cmd += ["--add-dir", str(d)]
+    cmd.append(prompt)
+    return cmd, {}
+
+
 async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
                   timeout_sec: int, semaphore: asyncio.Semaphore, dry_run: bool) -> dict:
     started = time.time()
@@ -225,18 +259,10 @@ async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
         log["dry_run"] = True
         return log
 
-    cmd = [
-        "codex", "exec",
-        "--skip-git-repo-check",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "-C", str(job.cwd),
-        "-m", model,
-    ]
-    if reasoning_effort:
-        cmd += ["-c", f"model_reasoning_effort={reasoning_effort}"]
-    for d in job.add_dirs:
-        cmd += ["--add-dir", str(d)]
-    cmd.append(job.prompt)
+    cmd, popen_kwargs = build_session_cmd(
+        model=model, reasoning_effort=reasoning_effort,
+        cwd=job.cwd, add_dirs=job.add_dirs, prompt=job.prompt,
+    )
 
     job.log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -248,6 +274,7 @@ async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
                     stdout=logfh,
                     stderr=asyncio.subprocess.STDOUT,
                     stdin=asyncio.subprocess.DEVNULL,
+                    **popen_kwargs,
                 )
                 try:
                     rc = await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
@@ -331,7 +358,8 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
     print(f"trials   : {len(jobs)}")
     print(f"out_root : {out_root}")
     print(f"parallel : {min(args.max_parallel, len(jobs))}")
-    print(f"model    : {args.model}  (reasoning={args.reasoning_effort or 'inherited'})")
+    backend = "claude" if is_claude_model(args.model) else "codex"
+    print(f"model    : {args.model}  (reasoning={args.reasoning_effort or 'inherited'}, backend={backend})")
     print(f"timeout  : {args.timeout_sec}s per trial")
 
     if args.dry_run:
@@ -339,15 +367,12 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
         print("\n--- dry-run sample prompt ---")
         print(sample.prompt[:1200] + ("..." if len(sample.prompt) > 1200 else ""))
         print("\n--- dry-run sample command ---")
-        cmd_preview = ["codex", "exec", "--skip-git-repo-check",
-                        "--dangerously-bypass-approvals-and-sandbox",
-                        "-C", str(sample.cwd),
-                        "-m", args.model]
-        if args.reasoning_effort:
-            cmd_preview += ["-c", f"model_reasoning_effort={args.reasoning_effort}"]
-        for d in sample.add_dirs:
-            cmd_preview += ["--add-dir", str(d)]
-        cmd_preview.append("<prompt>")
+        cmd_preview, kw = build_session_cmd(
+            model=args.model, reasoning_effort=args.reasoning_effort,
+            cwd=sample.cwd, add_dirs=sample.add_dirs, prompt="<prompt>",
+        )
+        if kw.get("cwd"):
+            print(f"(cwd={kw['cwd']})")
         print(" ".join(cmd_preview))
         return 0
 
@@ -519,12 +544,19 @@ def main() -> int:
                     help="root for the per-trial markdown tree (default: ./results)")
     ap.add_argument("-j", "--max-parallel", type=int, default=18,
                     help="concurrent trials per task (default: 18)")
-    ap.add_argument("-m", "--model", default="gpt-5.5")
+    ap.add_argument("-m", "--model", default="gpt-5.5",
+                    help="model to drive the audit. Names starting with "
+                         "'claude' (or 'opus'/'sonnet'/'haiku') route through "
+                         "the `claude` CLI; everything else routes through "
+                         "`codex exec`. Default: gpt-5.5.")
     ap.add_argument("--reasoning-effort", default="high",
-                    choices=["", "minimal", "low", "medium", "high", "xhigh"],
-                    help="codex reasoning effort, passed via -c "
-                         "model_reasoning_effort=<value>. Default 'high'. "
-                         "Pass empty string to inherit from ~/.codex/config.toml.")
+                    choices=["", "minimal", "low", "medium", "high", "xhigh", "max"],
+                    help="reasoning effort. For codex passed as "
+                         "-c model_reasoning_effort=<v>; for claude passed "
+                         "as --effort <v>. Default 'high'. Note: codex "
+                         "rejects 'max', claude rejects 'minimal' — use a "
+                         "value valid for the chosen backend. Empty string "
+                         "inherits from the CLI's own config.")
     ap.add_argument("-t", "--timeout-sec", type=int, default=1800)
     ap.add_argument("--prompt-file", help="override the default prompt template")
 
