@@ -4,15 +4,34 @@ For adapters paper experiments (correlation study, trajectory analysis, etc.) an
 
 ## `analyze.py` — per-trial codex auditor
 
-`analyze.py` takes a Harbor-Mix task id and spawns up to 18 `codex exec` sessions in parallel, one per trial of that task, and asks each to produce a structured failure analysis. It expects the trial corpus laid out as
+`analyze.py` takes a Harbor-Mix task id and spawns up to 18 `codex exec` sessions in parallel, one per trial of that task, and asks each to produce a structured failure analysis. It expects two local-only inputs:
 
 ```
-harbor-mix-trials/
+harbor-mix-trials/                                           # trial corpus (gitignored)
 ├── trials_extracted/<sanitised_task>/<trial_id>/{trajectory.json,result.json}
 └── uploaded_trials.jsonl
+
+task_dataset/                                                # canonical task source (gitignored)
+└── harbor-mix/datasets/{daytona,modal}/<daytona_name>/
+    ├── instruction.md           — canonical task brief
+    ├── tests/test.sh            — verifier entrypoint, defines reward gating
+    ├── tests/*                  — pytest fixtures / verifier scripts
+    ├── solution/solve.sh        — canonical oracle solution
+    ├── environment/Dockerfile   — agent environment image
+    └── task.toml                — timeouts, scoring mode, image tag
 ```
 
-(matching the shape of the `harbor-mix-final-for-analysis` dataset). The corpus directory is gitignored — keep it local.
+(matching the shape of the `harbor-mix-final-for-analysis` dataset and the `harbor-framework/harbor-adapters-experiments` repo respectively). Both are gitignored — keep them local. Setup:
+
+```bash
+# trial corpus: get from the original distribution (out of scope for this README)
+# task source: sparse-clone harbor-mix/datasets only (~150 MB)
+git clone --filter=blob:none --depth=1 --sparse \
+    https://github.com/harbor-framework/harbor-adapters-experiments.git task_dataset
+git -C task_dataset sparse-checkout set harbor-mix/datasets
+```
+
+The auditor prompt explicitly references the resolved task source dir for each trial (resolved via `uploaded_trials.jsonl`'s `requested_task_name` / `task_path`), and the codex session is given `--add-dir task_dataset/harbor-mix/datasets/`, so it can read the actual verifier code, oracle solution, and instruction text rather than guessing from the trajectory. Coverage on the current 1777-trial corpus: 100/100 tasks.
 
 ### Usage
 

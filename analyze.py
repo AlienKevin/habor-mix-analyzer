@@ -37,6 +37,11 @@ ROOT = Path("/data/trial-codex-analyze/harbor-mix-trials")
 TRIALS_ROOT = ROOT / "trials_extracted"
 UPLOADED_TRIALS = ROOT / "uploaded_trials.jsonl"
 
+# Sparse-clone of harbor-framework/harbor-adapters-experiments. Each task lives
+# at <TASK_DATASET_ROOT>/{daytona,modal}/<daytona_name>/ and contains
+# instruction.md, tests/, solution/solve.sh, environment/, task.toml.
+TASK_DATASET_ROOT = Path("/data/trial-codex-analyze/task_dataset/harbor-mix/datasets")
+
 DEFAULT_PROMPT_TEMPLATE = """\
 You are auditing one trial of a Harbor-Mix benchmark task. Goal: figure out
 why the agent failed (or, if it passed, what it actually did) and whether the
@@ -45,6 +50,17 @@ task itself is sound.
 Inputs (read-only — do not modify):
 - trajectory: {trajectory_path}
 - result    : {result_path}
+- task source dir (canonical task definition): {task_source_dir}
+  Contents (when present):
+    instruction.md          — the canonical task brief; may differ from what
+                              the harness rewrote into the agent's first user
+                              message in trajectory.json.
+    tests/test.sh           — the verifier's entrypoint; defines reward gating.
+    tests/test_outputs.py   — pytest-style assertions (BigCodeBench-shaped tasks).
+    tests/*                 — other verifier scripts / fixtures.
+    solution/solve.sh       — the canonical oracle solution.
+    environment/Dockerfile  — the agent's environment image.
+    task.toml               — timeouts, scoring mode, image tag.
 
 Trial metadata
 - task_name : {task_name}
@@ -57,8 +73,13 @@ Trial metadata
 Read trajectory.json carefully. Step 1 (source=user) contains the system
 prompt + the literal Task Description the agent received. Subsequent steps
 alternate between the agent's JSON responses (commands it issued) and the
-terminal output it observed. result.json contains the verifier reward, any
-exception, and the test stdout when present.
+terminal output it observed. result.json contains the verifier reward and
+any exception.
+
+When you reason about *failing-test evidence*, *hacking risk*, or *task
+quality*, read the actual files under the task source dir above rather than
+inferring from the trajectory alone. Quote real test code, real reward
+gating, real instruction text — not what you guess the verifier checks.
 
 Write your analysis to `{sanitised_task_name}/{trial_id}.md` (create the
 directory as needed). Cover, in this order:
@@ -128,6 +149,28 @@ def list_trials(task_dir: Path) -> list[Path]:
     return sorted(p for p in task_dir.iterdir() if p.is_dir())
 
 
+def resolve_task_source(meta: dict) -> Optional[Path]:
+    """Find the canonical task source dir for a trial.
+
+    `meta` is a row from uploaded_trials.jsonl. We try `requested_task_name`
+    first, then the last segment of `task_path`. The dir lives under either
+    daytona/ or modal/.
+    """
+    candidates: list[str] = []
+    name = meta.get("requested_task_name")
+    if name:
+        candidates.append(name)
+    tp = meta.get("task_path") or ""
+    if tp:
+        candidates.append(tp.rstrip("/").rsplit("/", 1)[-1])
+    for n in candidates:
+        for sub in ("daytona", "modal"):
+            p = TASK_DATASET_ROOT / sub / n
+            if p.is_dir():
+                return p
+    return None
+
+
 # ----------------------------------------------------------------------------- #
 # Codex driver
 # ----------------------------------------------------------------------------- #
@@ -148,9 +191,12 @@ def build_prompt(template: str, *, trial_dir: Path, task_name: str,
                  sanitised_task_name: str, meta: dict) -> str:
     result_path = trial_dir / "result.json"
     trajectory_path = trial_dir / "trajectory.json"
+    src = resolve_task_source(meta)
+    task_source_dir = str(src) if src else "(not available — task source not found in task_dataset/)"
     return template.format(
         trajectory_path=trajectory_path,
         result_path=result_path,
+        task_source_dir=task_source_dir,
         task_name=task_name,
         sanitised_task_name=sanitised_task_name,
         trial_id=trial_dir.name,
@@ -276,7 +322,7 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
             log_path=log_dir / f"{tdir.name}.log",
             prompt=prompt,
             cwd=out_root,
-            add_dirs=[TRIALS_ROOT],
+            add_dirs=[TRIALS_ROOT, TASK_DATASET_ROOT],
             metadata=meta,
         ))
 
@@ -292,12 +338,14 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
         print("\n--- dry-run sample prompt ---")
         print(sample.prompt[:1200] + ("..." if len(sample.prompt) > 1200 else ""))
         print("\n--- dry-run sample command ---")
-        print(" ".join(["codex", "exec", "--skip-git-repo-check",
+        cmd_preview = ["codex", "exec", "--skip-git-repo-check",
                         "--dangerously-bypass-approvals-and-sandbox",
                         "-C", str(sample.cwd),
-                        "-m", args.model,
-                        "--add-dir", str(TRIALS_ROOT),
-                        "<prompt>"]))
+                        "-m", args.model]
+        for d in sample.add_dirs:
+            cmd_preview += ["--add-dir", str(d)]
+        cmd_preview.append("<prompt>")
+        print(" ".join(cmd_preview))
         return 0
 
     sem = asyncio.Semaphore(min(args.max_parallel, len(jobs)))
