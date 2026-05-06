@@ -214,8 +214,13 @@ def is_claude_model(model: str) -> bool:
 
 def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
                       add_dirs: list[Path], prompt: str
-                      ) -> tuple[list[str], dict]:
-    """Return (argv, subprocess_kwargs). Routes to codex or claude based on model."""
+                      ) -> tuple[list[str], dict, Optional[bytes]]:
+    """Return (argv, subprocess_kwargs, stdin_bytes_or_None).
+
+    For codex the prompt is the trailing positional arg, so stdin is None.
+    For claude the prompt cannot be a positional (claude's --add-dir is a
+    multi-value flag that swallows trailing args), so we pass it via stdin.
+    """
     if is_claude_model(model):
         cmd = ["claude", "-p",
                "--model", model,
@@ -225,8 +230,7 @@ def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
             cmd += ["--effort", reasoning_effort]
         for d in add_dirs:
             cmd += ["--add-dir", str(d)]
-        cmd.append(prompt)
-        return cmd, {"cwd": str(cwd)}
+        return cmd, {"cwd": str(cwd)}, prompt.encode()
     cmd = ["codex", "exec",
            "--skip-git-repo-check",
            "--dangerously-bypass-approvals-and-sandbox",
@@ -237,7 +241,7 @@ def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
     for d in add_dirs:
         cmd += ["--add-dir", str(d)]
     cmd.append(prompt)
-    return cmd, {}
+    return cmd, {}, None
 
 
 async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
@@ -259,7 +263,7 @@ async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
         log["dry_run"] = True
         return log
 
-    cmd, popen_kwargs = build_session_cmd(
+    cmd, popen_kwargs, stdin_bytes = build_session_cmd(
         model=model, reasoning_effort=reasoning_effort,
         cwd=job.cwd, add_dirs=job.add_dirs, prompt=job.prompt,
     )
@@ -273,9 +277,14 @@ async def run_one(job: TrialJob, *, model: str, reasoning_effort: str,
                     *cmd,
                     stdout=logfh,
                     stderr=asyncio.subprocess.STDOUT,
-                    stdin=asyncio.subprocess.DEVNULL,
+                    stdin=(asyncio.subprocess.PIPE if stdin_bytes
+                           else asyncio.subprocess.DEVNULL),
                     **popen_kwargs,
                 )
+                if stdin_bytes is not None:
+                    proc.stdin.write(stdin_bytes)
+                    await proc.stdin.drain()
+                    proc.stdin.close()
                 try:
                     rc = await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
                 except asyncio.TimeoutError:
@@ -367,12 +376,14 @@ async def process_task(task_id: str, args: argparse.Namespace) -> int:
         print("\n--- dry-run sample prompt ---")
         print(sample.prompt[:1200] + ("..." if len(sample.prompt) > 1200 else ""))
         print("\n--- dry-run sample command ---")
-        cmd_preview, kw = build_session_cmd(
+        cmd_preview, kw, stdin_bytes = build_session_cmd(
             model=args.model, reasoning_effort=args.reasoning_effort,
             cwd=sample.cwd, add_dirs=sample.add_dirs, prompt="<prompt>",
         )
         if kw.get("cwd"):
             print(f"(cwd={kw['cwd']})")
+        if stdin_bytes is not None:
+            print("(prompt passed via stdin)")
         print(" ".join(cmd_preview))
         return 0
 

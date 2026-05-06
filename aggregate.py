@@ -190,8 +190,13 @@ def is_claude_model(model: str) -> bool:
 
 def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
                       add_dirs: list[Path], prompt: str
-                      ) -> tuple[list[str], dict]:
-    """Return (argv, subprocess_kwargs). Routes to codex or claude based on model."""
+                      ) -> tuple[list[str], dict, Optional[bytes]]:
+    """Return (argv, subprocess_kwargs, stdin_bytes_or_None).
+
+    Claude's --add-dir is a multi-value flag that swallows the prompt if it
+    follows on the command line, so for claude we pass the prompt via stdin
+    instead.
+    """
     if is_claude_model(model):
         cmd = ["claude", "-p",
                "--model", model,
@@ -201,8 +206,7 @@ def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
             cmd += ["--effort", reasoning_effort]
         for d in add_dirs:
             cmd += ["--add-dir", str(d)]
-        cmd.append(prompt)
-        return cmd, {"cwd": str(cwd)}
+        return cmd, {"cwd": str(cwd)}, prompt.encode()
     cmd = ["codex", "exec",
            "--skip-git-repo-check",
            "--dangerously-bypass-approvals-and-sandbox",
@@ -213,7 +217,7 @@ def build_session_cmd(*, model: str, reasoning_effort: str, cwd: Path,
     for d in add_dirs:
         cmd += ["--add-dir", str(d)]
     cmd.append(prompt)
-    return cmd, {}
+    return cmd, {}, None
 
 
 async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
@@ -232,7 +236,7 @@ async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
         rec["dry_run"] = True
         return rec
 
-    cmd, popen_kwargs = build_session_cmd(
+    cmd, popen_kwargs, stdin_bytes = build_session_cmd(
         model=codex_model, reasoning_effort=reasoning_effort,
         cwd=job.cwd, add_dirs=[], prompt=job.prompt,
     )
@@ -246,9 +250,14 @@ async def run_codex(job: CodexJob, *, codex_model: str, reasoning_effort: str,
                     *cmd,
                     stdout=logfh,
                     stderr=asyncio.subprocess.STDOUT,
-                    stdin=asyncio.subprocess.DEVNULL,
+                    stdin=(asyncio.subprocess.PIPE if stdin_bytes
+                           else asyncio.subprocess.DEVNULL),
                     **popen_kwargs,
                 )
+                if stdin_bytes is not None:
+                    proc.stdin.write(stdin_bytes)
+                    await proc.stdin.drain()
+                    proc.stdin.close()
                 try:
                     rc = await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
                 except asyncio.TimeoutError:
