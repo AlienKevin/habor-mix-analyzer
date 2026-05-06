@@ -9,13 +9,11 @@ to a tarball at
 that contains, among other things:
 
     <trial_name>/verifier/test-stdout.txt   <- the actual pytest output
-    <trial_name>/verifier/reward.txt        <- "1" iff tests passed, else "0"
 
-This script downloads each tarball, extracts those two files, and writes them
+This script downloads each tarball, extracts that file, and writes it
 alongside the existing trajectory.json / result.json:
 
     trials_extracted/<task>/<trial_id>/test_stdout.txt
-    trials_extracted/<task>/<trial_id>/reward.txt
     trials_extracted/<task>/<trial_id>/.test_stdout.status      <- one of: ok, missing, error:<short>
 
 Idempotent: a trial whose `.test_stdout.status` file says "ok" is skipped.
@@ -42,10 +40,8 @@ ROOT = Path("/data/trial-codex-analyze/harbor-mix-trials")
 TRIALS_ROOT = ROOT / "trials_extracted"
 SUPABASE_URL = "https://hnkceovsiaczvcwhdlkb.supabase.co/storage/v1/object/public/trials/{trial_id}.tar.gz"
 
-WANT_SUFFIXES = ("verifier/test-stdout.txt", "verifier/reward.txt")
 LOCAL_NAMES = {
     "verifier/test-stdout.txt": "test_stdout.txt",
-    "verifier/reward.txt":      "reward.txt",
 }
 
 

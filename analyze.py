@@ -56,7 +56,6 @@ Inputs (read-only — do not modify):
                 exception, timing breakdown.
 - test_stdout : {test_stdout_path}
                 The verifier's actual stdout (e.g. pytest output) from the trial run.
-- reward.txt  : {reward_txt_path}
 - task source dir (canonical task definition): {task_source_dir}
   Contents (when present):
     instruction.md          — the canonical task brief; may differ from what
@@ -188,18 +187,14 @@ def build_prompt(template: str, *, trial_dir: Path, task_name: str,
     result_path = trial_dir / "result.json"
     trajectory_path = trial_dir / "trajectory.json"
     test_stdout_path = trial_dir / "test_stdout.txt"
-    reward_txt_path = trial_dir / "reward.txt"
     if not test_stdout_path.exists():
         test_stdout_path = "(not available for this trial — Supabase tarball missing or never had a verifier/test-stdout.txt)"
-    if not reward_txt_path.exists():
-        reward_txt_path = "(not available)"
     src = resolve_task_source(meta)
     task_source_dir = str(src) if src else "(not available — task source not found in task_dataset/)"
     return template.format(
         trajectory_path=trajectory_path,
         result_path=result_path,
         test_stdout_path=test_stdout_path,
-        reward_txt_path=reward_txt_path,
         task_source_dir=task_source_dir,
         task_name=task_name,
         sanitised_task_name=sanitised_task_name,
