@@ -1,0 +1,74 @@
+{
+  "task": {
+    "id": "algotune-algotune-unit-simplex-projection",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "788611eb-bc8b-42a6-844e-2ef03fddbcb7",
+    "harness": "terminus-2",
+    "model": "deepseek-v4-pro",
+    "reward": 0.0,
+    "exception_type": "AgentTimeoutError",
+    "n_steps": 57
+  },
+  "task_summary": "Implement `/app/solver.py` with a `Solver.solve` method that computes the Euclidean projection of `y` onto the probability simplex, returning the unique optimal solution faster than the reference implementation.",
+  "instructions": {
+    "explicit": [
+      "Define `class Solver` in `/app/solver.py` with `solve(self, problem, **kwargs) -> Any`.",
+      "Return a dictionary with key `solution` containing the simplex projection of `problem[\"y\"]`.",
+      "Keep the implementation faster than the reference projection code."
+    ],
+    "implicit": [
+      "The verifier imports `/app/solver.py` in a fresh process, so the final solver must be self-contained or ship any helper modules it imports.",
+      "The score is based on end-to-end runtime of `solve(problem)`, not just the inner projection kernel.",
+      "A solver that imports auxiliary build artifacts must ensure those artifacts exist in the final verifier-visible workspace."
+    ],
+    "missed_implicit": [
+      "The verifier imports `/app/solver.py` in a fresh process, so the final solver must be self-contained or ship any helper modules it imports.",
+      "The score is based on end-to-end runtime of `solve(problem)`, not just the inner projection kernel.",
+      "A solver that imports auxiliary build artifacts must ensure those artifacts exist in the final verifier-visible workspace."
+    ],
+    "evidence": "STEP 21: \"Our end-to-end solver is slower than reference despite pythran speedup in core... Our solver avg time: 796.38 us; Ref solver avg time: 593.09 us; Speedup: 0.74x\". STEP 12: \"We'll import core_simplex and call _project_simplex. Also include warm-up in __init__.\" The verifier later failed on import with \"ModuleNotFoundError: No module named 'core_simplex'\"."
+  },
+  "closeness_to_success": {
+    "verdict": "partial",
+    "explanation": "The agent had a correct projection kernel by step 13 and even measured a faster core in step 12/17, but step 21 showed the full `solve(problem)` path was still slower than baseline at 0.74x. The path was lost at step 24, when it abandoned the working solver for more speculative Cython/numba churn and never stabilized a final importable workspace.",
+    "step_where_lost": 24,
+    "unproductive_iteration_count": 34
+  },
+  "superficial_cause": {
+    "summary": "The final `solver.py` imported `core_simplex`, but the verifier could not import that module.",
+    "evidence_quote": "test_stdout.txt: `import core_simplex` ... `E   ModuleNotFoundError: No module named 'core_simplex'`"
+  },
+  "root_cause": {
+    "category": "non-self-contained-final-state",
+    "summary": "The agent optimized kernels in isolation, then kept switching backends after the end-to-end benchmark regressed. It never consolidated a final solver that was both importable in the verifier process and faster than the reference; the last file depended on an auxiliary module that was absent when pytest loaded `/app/solver.py`.",
+    "evidence_quote": "STEP 21: \"Our end-to-end solver is slower than reference despite pythran speedup in core... Speedup: 0.74x\". STEP 12: \"We'll import core_simplex and call _project_simplex.\""
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "tests/test_outputs.py:39 loads `Solver` from `/app/solver.py` with `importlib.util.spec_from_file_location`; tests/test_outputs.py:46 executes the module; tests/test_outputs.py:89 checks the warmup solution with `task.is_solution`; tests/test_outputs.py:149 stops on invalidity; tests/test_outputs.py:198 requires `raw_speedup > 1.0`.",
+    "what_agent_produced": "The final solver printed by `tests/test.sh` starts with `import numpy as np` and `import core_simplex`, then calls `core_simplex._project_simplex(y)` inside `solve`; it is not self-contained.",
+    "exact_failure_quote": "E   ModuleNotFoundError: No module named 'core_simplex'",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had finished the Cython path it started and shipped a self-contained compiled projection implementation in the final workspace instead of leaving `solver.py` dependent on `core_simplex`, the verifier would have been able to import the solver and evaluate the speed benchmark.",
+    "X": "Complete the compiled backend and make `solver.py` self-contained or ensure its helper module exists in the verifier-visible filesystem before the run ends.",
+    "Y": "Keep iterating on pythran/numba and leave the final solver importing `core_simplex`.",
+    "single_step_fix": false
+  },
+  "task_quality": {
+    "verdict": "accept",
+    "issues": [],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This trial is not an algorithmic near-miss in the usual sense: the agent had a correct projection method, but the final failure came from a bad end-state where the verifier could not import the helper module. Aggregators should separate that packaging/import regression from the earlier valid-but-slower performance measurements."
+}

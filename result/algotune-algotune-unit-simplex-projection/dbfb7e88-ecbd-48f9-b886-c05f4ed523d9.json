@@ -1,0 +1,76 @@
+{
+  "task": {
+    "id": "algotune-algotune-unit-simplex-projection",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "dbfb7e88-ecbd-48f9-b886-c05f4ed523d9",
+    "harness": "claude-code",
+    "model": "hy3-preview",
+    "reward": 0.0,
+    "exception_type": null,
+    "n_steps": 4
+  },
+  "task_summary": "The agent had to implement `/app/solver.py` with a `Solver.solve` method that projects a vector onto the probability simplex. The verifier checks that the file exists, the outputs are correct, and the solver is faster than the provided baseline on large random instances.",
+  "instructions": {
+    "explicit": [
+      "Define a class named `Solver` in `/app/solver.py` with a `solve(self, problem, **kwargs)` method.",
+      "Return the Euclidean projection onto the probability simplex as a numpy array under the `solution` key.",
+      "Optimize for speed while matching the reference solution exactly enough to pass the verifier."
+    ],
+    "implicit": [
+      "Create the solver file at exactly `/app/solver.py` so the harness can import it.",
+      "Inspect or respect the verifier's file-existence gate, warmup/correctness check, and speedup threshold.",
+      "Make `Solver()` importable and instantiable with no required arguments."
+    ],
+    "missed_implicit": [
+      "Create the solver file at exactly `/app/solver.py` so the harness can import it.",
+      "Inspect or respect the verifier's file-existence gate, warmup/correctness check, and speedup threshold."
+    ],
+    "evidence": "Trajectory steps 2-4 are only chat messages. Step 2 outputs a Python code block beginning with `import numpy as np` instead of a filesystem write, and step 3 says `Now, let's write the full code in /app/solver.py.` without any subsequent write action. The verifier then printed `No solver.py found at /app/solver.py` and failed immediately."
+  },
+  "closeness_to_success": {
+    "verdict": "far",
+    "explanation": "The agent drafted a plausible solver, including a numba-accelerated variant, but never materialized it in `/app/solver.py`. The failure happened at the file-existence gate before any correctness or speed test could run; the path was lost at step 2 and never recovered in steps 3-4.",
+    "step_where_lost": 2,
+    "unproductive_iteration_count": 3
+  },
+  "superficial_cause": {
+    "summary": "No `/app/solver.py` existed when the verifier ran.",
+    "evidence_quote": "test_stdout.txt: `No solver.py found at /app/solver.py` and `AssertionError: Solver file not found at /app/solver.py`."
+  },
+  "root_cause": {
+    "category": "reasoned-without-writing",
+    "summary": "The agent spent the run in self-dialogue about the simplex algorithm and a numba optimization, but it never used the workspace to create the required solver file. That is an execution failure, not an algorithmic one: the drafted code was never persisted to the location the harness imports.",
+    "evidence_quote": "Trajectory step 4 says `Now, let's write the full code.` and later `Now, let's write the final code.`, but there is no file-write action anywhere in the 4-step trajectory."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "tests/test_outputs.py:23-24 sets `SOLVER_PATH = Path(\"/app/solver.py\")`; 38-47 fails if that file is absent and imports `Solver`; 185-199 asserts the file exists and that `raw_speedup > 1.0`.",
+    "what_agent_produced": "The agent only produced a code block in chat; it did not create `/app/solver.py`. The verifier therefore printed `No solver.py found at /app/solver.py` before running the performance checks.",
+    "exact_failure_quote": "No solver.py found at /app/solver.py\nAssertionError: Solver file not found at /app/solver.py",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had written its drafted solver into `/app/solver.py` instead of only discussing it in chat, the trial would have passed.",
+    "X": "Use a file-writing action to materialize the drafted `Solver` implementation at `/app/solver.py` before the verifier starts, so the harness can import it and run the already-correct simplex projection code.",
+    "Y": "Emit the solver as a chat code block and continue reasoning without any filesystem write.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "The prompt's example output (`[0.25, 0.75]` for `y = [1., 1.2]`) contradicts the reference implementation and the actual Euclidean projection objective.",
+      "The task source tree exposes `solution/solve.sh`, which writes an oracle solver into `/app/solver.py`; that is structurally hackable if the source tree is readable at runtime."
+    ],
+    "verifier_structurally_hackable": true,
+    "structural_hackability_notes": "The local task bundle includes `solution/solve.sh` at lines 5-103, and that script writes a full solver implementation directly to `/app/solver.py`. An agent with read access to the task source tree can recover the oracle without solving the problem."
+  },
+  "notes_for_aggregation": "This trial failed for a persistence/execution reason, not because the simplex algorithm was wrong: the transcript contains a plausible solver draft, but it never left the chat. The instruction example is also inconsistent with the reference solution, which is worth flagging separately when aggregating task quality."
+}

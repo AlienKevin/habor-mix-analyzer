@@ -1,0 +1,74 @@
+{
+  "task": {
+    "id": "algotune-algotune-outer-product",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "822ecd68-7249-408e-95c3-662b323846bc",
+    "harness": "codex",
+    "model": "gpt-5.5",
+    "reward": 1.0,
+    "exception_type": null,
+    "n_steps": 27
+  },
+  "task_summary": "The agent was asked to implement `/app/solver.py` with a `Solver.solve` method that computes the outer product of two same-length vectors and runs faster than the provided `np.outer` baseline.",
+  "instructions": {
+    "explicit": [
+      "Define `Solver.solve` in `/app/solver.py` for a tuple of two one-dimensional numeric arrays.",
+      "Return the same outer-product result as `np.outer(vec1, vec2)` while optimizing for speed and avoiding cheating."
+    ],
+    "implicit": [
+      "Optimize for the verifier's actual workload, which uses `PROBLEM_SIZE = 12288`, 100 test instances, and interleaved timing.",
+      "Validate candidates against the real benchmark conditions instead of relying on a synthetic sweep over unrelated sizes and dtypes.",
+      "Keep the module importable and numerically exact enough to satisfy `task.is_solution`."
+    ],
+    "missed_implicit": [
+      "Optimize for the verifier's actual workload, which uses `PROBLEM_SIZE = 12288`, 100 test instances, and interleaved timing.",
+      "Validate candidates against the real benchmark conditions instead of relying on a synthetic sweep over unrelated sizes and dtypes."
+    ],
+    "evidence": "Step 5 only listed `/app` and AGENTS.md, not the verifier files. Step 7 benchmarked `n` in `[1,2,4,8,16,32,64,128,256,512,1024,2048,4096]`, and step 19 said, `Numba timings are taking too long; I’ll proceed with a robust broadcast implementation and a tiny special-case fast path.`"
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The solver was functionally correct, but the verifier measured a raw speedup of only 0.9516x, so it missed the pass threshold by 4.8%. The path was lost at step 19 when the agent stopped iterating on faster kernels and committed to the broadcast implementation.",
+    "step_where_lost": 19,
+    "unproductive_iteration_count": 9
+  },
+  "superficial_cause": {
+    "summary": "The final solver used `np.multiply(vec1[:, None], vec2)` with only empty/length-1 special cases, and that implementation was slower than the reference under the verifier.",
+    "evidence_quote": "test_stdout.txt: `Raw Speedup:         0.9516 x` and `AssertionError: Solver was not faster than baseline (Speedup: 0.95x)`"
+  },
+  "root_cause": {
+    "category": "premature microbenchmark overfitting",
+    "summary": "The agent spent most of its budget on local benchmark loops over arbitrary sizes and dtypes, then froze a broadcast-based solution without validating it against the actual verifier workload. The result was correct but about 5% slower than baseline under the real interleaved test protocol.",
+    "evidence_quote": "Step 19: `Numba timings are taking too long; I’ll proceed with a robust broadcast implementation and a tiny special-case fast path.`"
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "In `tests/test_outputs.py:138-170`, the fixture accumulates interleaved timings over 100 generated problems and computes `raw_speedup = total_time_baseline / total_time_solver`; in `tests/test_outputs.py:196-199`, `test_solver_speedup` asserts `performance_results[\"raw_speedup\"] > 1.0`.",
+    "what_agent_produced": "The final solver written to `/app/solver.py` returns `np.multiply(vec1[:, None], vec2)` for the general case and only special-cases empty and length-1 vectors.",
+    "exact_failure_quote": "Raw Speedup:         0.9516 x\nAssertionError: Solver was not faster than baseline (Speedup: 0.95x)\nassert 0.9516356745745532 > 1.0",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had replaced the final broadcast-based kernel with a faster implementation validated on the verifier's actual `PROBLEM_SIZE = 12288` workload instead of freezing the synthetic-benchmark winner, the trial would have passed.",
+    "X": "Profile the actual verifier-size workload and keep the fastest candidate for that exact setting, instead of stopping at `np.multiply(vec1[:, None], vec2)`.",
+    "Y": "Stop after the local benchmarks and write the broadcast-based solver in step 20.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "`tests/test_outputs.py` uses a mercy score of 1.0 whenever `raw_speedup < 1.0` or validity fails, so the reward does not distinguish a failing solver from the minimum score case."
+    ],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This trial is a near-miss with a misleading reward: the verifier failed on speedup, but the reported reward is still 1.0 because of the mercy-floor logic. Aggregate analysis should treat the raw-speedup/assertion failure as the real outcome, not the reward field."
+}

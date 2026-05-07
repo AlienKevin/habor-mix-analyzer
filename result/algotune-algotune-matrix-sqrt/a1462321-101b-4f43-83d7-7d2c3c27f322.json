@@ -1,0 +1,68 @@
+{
+  "task": {
+    "id": "algotune-algotune-matrix-sqrt",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "a1462321-101b-4f43-83d7-7d2c3c27f322",
+    "harness": "claude-code",
+    "model": "claude-opus-4-7",
+    "reward": 2.2606,
+    "exception_type": null,
+    "n_steps": 54
+  },
+  "task_summary": "The agent had to implement `Solver.solve` in `/app/solver.py` for the principal matrix square root problem and make it faster than the reference SciPy baseline. The verifier generates 100 random 192x192 complex matrices, checks output validity, and scores the run by speedup.",
+  "instructions": {
+    "explicit": [
+      "Define `Solver.solve(problem, **kwargs)` in `/app/solver.py` so it returns the principal matrix square root as `{\"sqrtm\": {\"X\": ...}}`.",
+      "Make the solver faster than the reference implementation while still producing valid outputs."
+    ],
+    "implicit": [
+      "Satisfy the verifier's `task.is_solution` contract: the returned `X` must be a square, finite list-of-lists whose square reconstructs the input within tolerance.",
+      "Optimize for the actual benchmark regime in `tests/test_outputs.py`: 100 instances of size 192 with interleaved timing and a `raw_speedup > 1.0` requirement."
+    ],
+    "missed_implicit": [],
+    "evidence": ""
+  },
+  "closeness_to_success": {
+    "verdict": "partial",
+    "explanation": "The trial ended in a pass, but the first implementation path was only a partial solution: step 6 wrote an eigendecomposition-based solver, and steps 7-28 spent time benchmarking that slower path before the pivot at step 30. The passing solution only arrived after step 41 rewrote the solver to call SciPy's compiled `recursive_schur_sqrtm` directly.",
+    "step_where_lost": 6,
+    "unproductive_iteration_count": 15
+  },
+  "superficial_cause": {
+    "summary": "The initial eigendecomposition-based solver was not consistently faster than SciPy's baseline, so the agent had to replace it.",
+    "evidence_quote": "Step 12: \"Custom n=200: 15702.16 ms ... scipy n=200: 12839.63 ms\"; step 42: \"n=100: custom=22.09ms, scipy=20.30ms, speedup=0.92x, valid=True\"."
+  },
+  "root_cause": {
+    "category": "missed_scipy_fast_path",
+    "summary": "The deeper issue was an incomplete mental model of SciPy's matrix square root implementation. The agent first optimized around an eigendecomposition prototype, then discovered from SciPy source that the fast path is the compiled `recursive_schur_sqrtm` helper, which the final solver called directly.",
+    "evidence_quote": "Step 54: \"The key optimization: bypass the `scipy.linalg.sqrtm` Python wrapper which computes an extra `||X@X - A||_F` error norm (an O(n^3) matmul) when `disp=False`, and call the underlying compiled `recursive_schur_sqrtm` C extension directly.\""
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "The fixture in `tests/test_outputs.py:26`, `tests/test_outputs.py:27`, `tests/test_outputs.py:28`, and `tests/test_outputs.py:29` sets the benchmark to 192x192 matrices with 100 instances and 10 repeats. It warms up both baseline and solver, validates each solver output with `task.is_solution` (`tests/test_outputs.py:83`, `tests/test_outputs.py:88`, `tests/test_outputs.py:89`, `tests/test_outputs.py:90`), accumulates interleaved timings (`tests/test_outputs.py:142`, `tests/test_outputs.py:149`, `tests/test_outputs.py:157`), and finally asserts `raw_speedup > 1.0` (`tests/test_outputs.py:190`, `tests/test_outputs.py:196`, `tests/test_outputs.py:198`).",
+    "what_agent_produced": "Step 41 rewrote `/app/solver.py` to `from scipy.linalg._matfuncs_schur_sqrtm import recursive_schur_sqrtm` and call `X, _ill, _sing, info = recursive_schur_sqrtm(a)`. Step 53 shows the final file with dtype coercion, C-contiguity normalization, and `return {\"sqrtm\": {\"X\": X.tolist()}}`.",
+    "exact_failure_quote": "Validity: True\nTotal Baseline Time: 26.3074s\nTotal Solver Time:   11.6375s\nRaw Speedup:         2.2606 x\nFinal Reward (Score): 2.2606",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had written the direct `recursive_schur_sqrtm`-based solver at step 6 instead of the eigendecomposition prototype, the trial would have passed on the first implementation.",
+    "X": "Write `/app/solver.py` to import `recursive_schur_sqrtm`, coerce the input to a supported inexact dtype, ensure C-contiguous layout, call `recursive_schur_sqrtm(a)`, and return `X.tolist()` immediately.",
+    "Y": "Write the eigendecomposition solver with `np.linalg.eig`, `np.linalg.solve`, a manual reconstruction check, and a fallback to `scipy.linalg.sqrtm`.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept",
+    "issues": [],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "The trial passed cleanly, but the interesting pattern is the late pivot from a custom eigendecomposition prototype to direct use of SciPy's private compiled `recursive_schur_sqrtm`. Aggregators should treat the early slow path as exploratory churn, not as a failed final submission."
+}

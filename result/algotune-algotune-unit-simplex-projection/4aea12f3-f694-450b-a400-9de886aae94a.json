@@ -1,0 +1,75 @@
+{
+  "task": {
+    "id": "algotune-algotune-unit-simplex-projection",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "4aea12f3-f694-450b-a400-9de886aae94a",
+    "harness": "terminus-2",
+    "model": "minimax-m2.7",
+    "reward": 1.0,
+    "exception_type": null,
+    "n_steps": 6
+  },
+  "task_summary": "The agent was asked to implement `/app/solver.py` with a `Solver.solve(problem, **kwargs)` method that returns the Euclidean projection of `y` onto the probability simplex, using a faster-than-reference implementation.",
+  "instructions": {
+    "explicit": [
+      "Define a `Solver` class in `/app/solver.py` with a `solve(self, problem, **kwargs)` method.",
+      "Return `{\"solution\": <numpy array>}` for the Euclidean projection onto the probability simplex, and optimize for speed."
+    ],
+    "implicit": [
+      "Check the real verifier behavior in `/tests/test_outputs.py` or by running `tests/test.sh`, not only hand-written smoke tests.",
+      "Keep the solver import-safe under the harness's `importlib.util.spec_from_file_location(...).exec_module(...)` loading path.",
+      "Beat the reference runtime on the benchmark, not just produce a mathematically correct answer on toy inputs."
+    ],
+    "missed_implicit": [
+      "Check the real verifier behavior in `/tests/test_outputs.py` or by running `tests/test.sh`, not only hand-written smoke tests.",
+      "Keep the solver import-safe under the harness's `importlib.util.spec_from_file_location(...).exec_module(...)` loading path.",
+      "Beat the reference runtime on the benchmark, not just produce a mathematically correct answer on toy inputs."
+    ],
+    "evidence": "Step 3: \"I'll implement an optimized solution using numba JIT compilation for O(nlogn) performance\" and the emitted file used \"@njit(cache=True)\". Step 4 only ran a custom `python3` smoke test (`from solver import Solver`) instead of the verifier. The real run failed with `Solver raised exception during warmup: No module named 'solver'`."
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The core simplex projection logic was mathematically correct and the agent's own hand tests passed in step 4. It lost the benchmark at step 4 by validating only a custom `/app` script instead of the real harness; the verifier later failed during warmup with `No module named 'solver'` and never produced a valid timed result.",
+    "step_where_lost": 4,
+    "unproductive_iteration_count": 2
+  },
+  "superficial_cause": {
+    "summary": "The submitted solver looked fine in the agent's ad hoc tests, but the verifier could not load it during warmup, so the benchmark never reached a valid speed measurement.",
+    "evidence_quote": "test_stdout.txt: `Solver raised exception during warmup: No module named 'solver'`"
+  },
+  "root_cause": {
+    "category": "harness-compatibility-blind-spot",
+    "summary": "The agent optimized the math in isolation and never checked the verifier's import and scoring path. Using `@njit(cache=True)` and then trusting a custom smoke test hid the harness-specific failure until grading.",
+    "evidence_quote": "Step 3: \"I'll implement an optimized solution using numba JIT compilation for O(nlogn) performance\"; the saved solver used `@njit(cache=True)`, and step 4 validated only `from solver import Solver` rather than the verifier."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "tests/test_outputs.py:41-47 loads `/app/solver.py`; 81-94 warms up `solver_func(problem)` and returns invalid on exceptions; 163-170 assigns mercy score 1.0 for invalid or slower runs; 190-199 fail unless validity is true and `raw_speedup > 1.0`.",
+    "what_agent_produced": "The final solver printed by the trial is a numba-decorated simplex projection with `@njit(cache=True)` and `y = np.asarray(problem.get(\"y\"), dtype=np.float64)`, and the agent only verified it with a custom `python3` snippet in `/app`.",
+    "exact_failure_quote": "ERROR    test_outputs:test_outputs.py:93 Solver raised exception during warmup: No module named 'solver'\nE       AssertionError: Solver was not faster than baseline (Speedup: 0.00x)",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had used the same JIT simplex projection without `cache=True` instead of `@njit(cache=True)`, the verifier would have loaded `/app/solver.py` cleanly and the trial would have passed.",
+    "X": "Write the same `Solver.solve` implementation with `@njit` but without caching, then submit that import-safe version.",
+    "Y": "Write `@njit(cache=True)` and stop after a custom hand-run smoke test from `/app`.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "The task bundle ships a canonical oracle at `solution/solve.sh`; if that directory is mounted into the runtime, it is directly readable ground truth."
+    ],
+    "verifier_structurally_hackable": true,
+    "structural_hackability_notes": "The canonical solution is present in `/data/trial-codex-analyze/task_dataset/harbor-mix/datasets/daytona/algotune-algotune-unit-simplex-projection/solution/solve.sh`, so a runtime with access to the task source tree can bypass the intended work by reading it."
+  },
+  "notes_for_aggregation": "This is a reward-masking case: the wrapper reports 1.0 even though pytest failed before any valid timing run. Aggregators should inspect verifier stdout, not reward alone, on this benchmark."
+}

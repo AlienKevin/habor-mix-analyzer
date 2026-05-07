@@ -1,0 +1,75 @@
+{
+  "task": {
+    "id": "algotune-algotune-unit-simplex-projection",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "c1b0c002-3f53-4870-8c2d-0b314ced8714",
+    "harness": "claude-code",
+    "model": "glm-5.1",
+    "reward": 0.0,
+    "exception_type": null,
+    "n_steps": 15
+  },
+  "task_summary": "The agent had to implement `/app/solver.py` with a `Solver.solve` method that projects an input vector onto the probability simplex. The solution had to be correct and faster than the provided reference implementation on large generated instances.",
+  "instructions": {
+    "explicit": [
+      "Define a `Solver` class in `/app/solver.py` with a `solve(self, problem, **kwargs)` entrypoint.",
+      "Return a dictionary containing the optimal simplex projection as `{\"solution\": ...}` while staying faster than the reference solver."
+    ],
+    "implicit": [
+      "Validate against the actual pytest harness in `tests/test_outputs.py`, not only against ad hoc direct imports.",
+      "Keep `Solver.__init__` safe because the verifier instantiates the class before timing begins.",
+      "Avoid runtime patterns that depend on the module being importable by name under the harness loader."
+    ],
+    "missed_implicit": [
+      "Validate against the actual pytest harness in `tests/test_outputs.py`, not only against ad hoc direct imports.",
+      "Keep `Solver.__init__` safe because the verifier instantiates the class before timing begins.",
+      "Avoid runtime patterns that depend on the module being importable by name under the harness loader."
+    ],
+    "evidence": "Step 6 and step 9 used direct-import checks only: `python -c \"... from solver import Solver ...\"`, then declared success after matching the reference. The verifier instead does `spec = importlib.util.spec_from_file_location(\"solver\", SOLVER_PATH)` and `return solver_module.Solver()` (tests/test_outputs.py:44-47), which is the import path the agent never exercised."
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The core simplex-projection math was correct, and the agent's own direct-import tests in steps 6 and 9 matched the reference. The trial failed only when the real verifier instantiated `Solver()` through its importlib loader, where the step-4 design of `@njit(cache=True)` plus eager warmup in `__init__` crashed before timing started.",
+    "step_where_lost": 4,
+    "unproductive_iteration_count": 4
+  },
+  "superficial_cause": {
+    "summary": "The verifier crashed during `Solver()` construction because Numba cache loading tried to import the module name `solver` and failed.",
+    "evidence_quote": "test_stdout.txt: `solver.py:42: in __init__\\n    _project_simplex(np.array([1.0, 2.0]))\\n...\\nE   ModuleNotFoundError: No module named 'solver'`"
+  },
+  "root_cause": {
+    "category": "harness-mismatch / numba cache",
+    "summary": "The agent optimized the algorithm but validated only under a normal `from solver import Solver` path. The real harness loads the file with `importlib.util.spec_from_file_location` and instantiates `Solver()` inside pytest, so the `@njit(cache=True)` warmup path in `__init__` failed before any solve call or benchmark could run.",
+    "evidence_quote": "Step 4 wrote `@njit(cache=True)` and `class Solver:\\n    def __init__(self):\\n        _project_simplex(np.array([1.0, 2.0]))`. Step 12 shows the final file still had those lines at `/app/solver.py:5, 40-46`."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "tests/test_outputs.py:38-47 loads `SOLVER_PATH = Path(\"/app/solver.py\")` with `importlib.util.spec_from_file_location(\"solver\", SOLVER_PATH)` and returns `solver_module.Solver()`. The same file then warms up and times `solver_instance.solve` against `task.solve` over 100 generated problems of size 786432 (tests/test_outputs.py:66-117, 127-199).",
+    "what_agent_produced": "The final solver file kept `@njit(cache=True)` and the eager warmup call in `Solver.__init__` (`/app/solver.py:5, 40-46` from step 12). The agent's own self-checks in steps 6 and 9 only used `from solver import Solver`, and those checks reported `match=True` even though the verifier later crashed.",
+    "exact_failure_quote": "E   ModuleNotFoundError: No module named 'solver'",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had written the same projection algorithm without Numba cache-warming in `Solver.__init__`, the trial would have passed.",
+    "X": "Remove `cache=True` from `@njit` and delete the eager `_project_simplex(np.array([1.0, 2.0]))` call in `Solver.__init__`, then let the verifier import and time the solver normally.",
+    "Y": "Keep `@njit(cache=True)` and force JIT compilation inside `Solver.__init__`.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "The worked example in the prompt says `[0.25, 0.75]` for input `[1., 1.2]`, but the reference implementation and the actual simplex projection return `[0.4, 0.6]`."
+    ],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This failure is a harness-compatibility bug, not an algorithmic one: the solver passed the agent's ad hoc tests but crashed under pytest's importlib loading. Aggregators should separate math correctness from init-time import behavior for this trial."
+}

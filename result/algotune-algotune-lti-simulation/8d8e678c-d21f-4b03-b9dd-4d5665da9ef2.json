@@ -1,0 +1,75 @@
+{
+  "task": {
+    "id": "algotune-algotune-lti-simulation",
+    "benchmark": "algotune",
+    "task_broken": true,
+    "broken_reason": "The task source directory ships a readable oracle implementation at /data/trial-codex-analyze/task_dataset/harbor-mix/datasets/daytona/algotune-algotune-lti-simulation/solution/solve.sh. That file writes a complete /app/solver.py solver, so a trial can recover ground truth code at runtime."
+  },
+  "trial": {
+    "id": "8d8e678c-d21f-4b03-b9dd-4d5665da9ef2",
+    "harness": "terminus-2",
+    "model": "hy3-preview",
+    "reward": 1.0,
+    "exception_type": "AgentTimeoutError",
+    "n_steps": 51
+  },
+  "task_summary": "Implement /app/solver.py with a Solver.solve method that returns the LTI system output yout for given transfer-function coefficients, input samples, and time points, and make it faster than the reference scipy.signal.lsim baseline on the generated benchmark set.",
+  "instructions": {
+    "explicit": [
+      "Define `Solver` in `/app/solver.py` with `solve(self, problem, **kwargs) -> Any` and return a dictionary containing `yout`.",
+      "Match the reference `scipy.signal.lsim` output while running faster than the baseline under the verifier's speedup metric."
+    ],
+    "implicit": [
+      "Inspect the verifier and benchmark generator to learn the actual scoring rule and problem distribution.",
+      "Optimize for the full 100-instance benchmark, not just correctness on a few examples.",
+      "Expect the hidden problems to use evenly spaced time vectors generated with `np.linspace(...)`."
+    ],
+    "missed_implicit": [
+      "Expect the hidden problems to use evenly spaced time vectors generated with `np.linspace(...)`.",
+      "Optimize for the full 100-instance benchmark, not just isolated microbenchmarks."
+    ],
+    "evidence": "Task source log lines 859-908 show `generate_problem(...)` and `t = np.linspace(0, t_max, num_points)`. The agent spent steps 20, 28, 35, 36, 38, 40, 41, and 43 on non-uniform-time debugging, including step 20: \"The reference scipy.signal.lsim requires equally spaced time steps, but my random time vector isn't equally spaced.\""
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The final solver was valid but not fast enough: the verifier measured `Raw Speedup: 0.9499 x` and failed only on the speedup threshold. The path was lost once the agent saw in step 31 that the custom loop was already the bottleneck, but it kept iterating on the same expm-based design through step 51.",
+    "step_where_lost": 31,
+    "unproductive_iteration_count": 19
+  },
+  "superficial_cause": {
+    "summary": "The final `/app/solver.py` was slower than the baseline `task.solve`, so `raw_speedup` stayed below 1.0 and the speed test failed.",
+    "evidence_quote": "test_stdout.txt: `Total Baseline Time: 9.0753s`, `Total Solver Time:   9.5542s`, `Raw Speedup:         0.9499 x`, followed by `AssertionError: Solver was not faster than baseline (Speedup: 0.95x)`."
+  },
+  "root_cause": {
+    "category": "performance_model_mismatch",
+    "summary": "The agent optimized a mathematically correct custom state-space simulator, but its own profiling showed the main loop was the bottleneck and still slower than the benchmark's baseline. It then kept refining the same expm/inverse-based architecture instead of switching to an implementation with lower per-call overhead on the actual benchmark workload.",
+    "evidence_quote": "Step 31: \"The main loop is the bottleneck! ... reference lsim is slightly faster than my main loop.\" Step 32 then claimed \"My solver is now faster than lsim cached\" even though the final verifier measured 0.9499x."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "tests/test_outputs.py:156-168 computes `raw_speedup = total_time_baseline / total_time_solver` and assigns mercy score 1.0 when it is below 1.0. Lines 196-199 assert `performance_results[\"raw_speedup\"] > 1.0`.",
+    "what_agent_produced": "The final solver printed by the verifier is a custom `tf2ss` plus state-space simulation that computes `expAdt = linalg.expm(A * dt)`, `A_inv = linalg.inv(A)`, `A_inv2 = A_inv @ A_inv`, and loops over all samples with `for i in range(1, nt):`.",
+    "exact_failure_quote": "Raw Speedup:         0.9499 x\nE       AssertionError: Solver was not faster than baseline (Speedup: 0.95x)",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had kept the step-32 fast path it had already profiled as faster than the reference, instead of continuing to edit the custom expm-based solver until the final slower version, the trial would have passed.",
+    "X": "Leave /app/solver.py at the step-32 optimized version that the agent had just benchmarked, and stop adding further changes to the expm/inverse loop.",
+    "Y": "Continue modifying the custom solver after step 32 until the final verifier run produced `Total Solver Time:   9.5542s` versus `Total Baseline Time: 9.0753s`.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "reject",
+    "issues": [
+      "The task source directory includes a readable oracle at `/data/trial-codex-analyze/task_dataset/harbor-mix/datasets/daytona/algotune-algotune-lti-simulation/solution/solve.sh`, which is a direct benchmark-answer leak.",
+      "The surface prompt says `t` is only monotonically increasing, but the hidden generator uses `np.linspace(...)` and only exercises evenly spaced time grids."
+    ],
+    "verifier_structurally_hackable": true,
+    "structural_hackability_notes": "The shipped `solution/solve.sh` file contains a full solver implementation and can be read directly from the task source tree."
+  },
+  "notes_for_aggregation": "This trial is a valid-solution speed miss, not a correctness miss: the verifier passed validity and failed only on `raw_speedup > 1.0`. The agent also spent many steps on non-uniform-time debugging even though the benchmark generator uses evenly spaced `t`."
+}

@@ -1,0 +1,70 @@
+{
+  "task": {
+    "id": "algotune-algotune-unit-simplex-projection",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "9108a257-d989-4bf5-bcca-855407aab853",
+    "harness": "terminus-2",
+    "model": "hy3-preview",
+    "reward": 1.0273,
+    "exception_type": null,
+    "n_steps": 29
+  },
+  "task_summary": "The agent was asked to implement `Solver.solve` in `/app/solver.py` for Euclidean projection onto the probability simplex, using an efficient O(n log n) method and returning `{\"solution\": numpy_array}`. The verifier measures both correctness and speed against a baseline implementation.",
+  "instructions": {
+    "explicit": [
+      "Define a `Solver` class in `/app/solver.py` with `solve(self, problem, **kwargs)`.",
+      "Return a dictionary with key `solution` containing a NumPy array, and make the solver faster than the reference O(n log n) baseline."
+    ],
+    "implicit": [
+      "Keep the implementation compatible with the verifier at `/tests/test_outputs.py`, which loads `/app/solver.py` and checks both validity and speedup.",
+      "Match the reference numerical output within tolerance while handling large vectors efficiently."
+    ],
+    "missed_implicit": [],
+    "evidence": ""
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The trial passed, but the agent spent several steps on detours: an incorrect fallback variant failed local checks at step 11, and a loop-based rho search replaced the vectorized version at step 20 before being reverted. The final verifier run still passed, so this was a successful run with unnecessary churn rather than a clean straight-line solve.",
+    "step_where_lost": 11,
+    "unproductive_iteration_count": 2
+  },
+  "superficial_cause": {
+    "summary": "The visible detour was swapping the correct vectorized threshold search for a Python loop over all indices, which is unnecessary in a speed benchmark.",
+    "evidence_quote": "step 20: valid_count = 0; for i in range(n): if sorted_y[i] * (i + 1) > cumsum_m1[i]: valid_count = i + 1"
+  },
+  "root_cause": {
+    "category": "premature micro-optimization churn",
+    "summary": "The agent kept rewriting a correct O(n log n) NumPy solution in search of marginal performance gains, which introduced one bad fallback and one slower loop-based branch before it settled back on a correct implementation.",
+    "evidence_quote": "step 21: I just tried a loop-based approach to find rho, but this will be slower than the vectorized numpy approach."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "/tests/test_outputs.py:38-47 loads `/app/solver.py`; 66-117 times `solver.solve` against `Task.solve`; 127-182 computes `raw_speedup = total_time_baseline / total_time_solver` and writes the reward; 185-199 fail unless the solver exists, is valid, and `raw_speedup > 1.0`.",
+    "what_agent_produced": "The final verifier run printed a NumPy-based simplex projection and reported `Validity: True` with `Final Reward (Score): 1.0273`.",
+    "exact_failure_quote": "PASSED ../tests/test_outputs.py::test_solver_exists\nPASSED ../tests/test_outputs.py::test_solver_validity\nPASSED ../tests/test_outputs.py::test_solver_speedup\n======================== 3 passed in 141.94s (0:02:21) =========================",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had kept the correct vectorized NumPy simplex projection from step 12/21 instead of overwriting it with the loop-based rho search at step 20, the trial would have passed without the detour.",
+    "X": "Preserve the vectorized `np.any(valid)` / `np.count_nonzero(valid)` implementation and stop after the successful local tests.",
+    "Y": "Replace it with the Python `for i in range(n)` rho scan and continue iterating on micro-optimizations.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "The example output in `instruction.md` is incorrect for `y = [1.0, 1.2]`; the correct projection is `[0.4, 0.6]`, which the reference and verifier use."
+    ],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This trial passed with only a small speedup margin over baseline (1.0273x), after many exploratory rewrites of the same solver. The misleading example output in the prompt is the only task-level caveat; the verifier itself was sound."
+}

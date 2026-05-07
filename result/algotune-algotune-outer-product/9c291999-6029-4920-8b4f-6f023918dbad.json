@@ -1,0 +1,74 @@
+{
+  "task": {
+    "id": "algotune-algotune-outer-product",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "9c291999-6029-4920-8b4f-6f023918dbad",
+    "harness": "terminus-2",
+    "model": "mimo-v2.5-pro",
+    "reward": 1.0,
+    "exception_type": null,
+    "n_steps": 19
+  },
+  "task_summary": "The agent was asked to implement `/app/solver.py` with a `Solver.solve` method that computes the outer product of two one-dimensional vectors and is faster than the reference `np.outer` baseline.",
+  "instructions": {
+    "explicit": [
+      "Define a class named `Solver` in `/app/solver.py` with a `solve(self, problem, **kwargs)` method that returns the outer product of the two input vectors.",
+      "Optimize the solver so it runs faster than the reference `np.outer` implementation while returning a valid NumPy array."
+    ],
+    "implicit": [
+      "The verifier fixes the benchmark size at `PROBLEM_SIZE = 12288` and evaluates 100 instances, so the winning implementation needed to be tuned for that exact workload rather than a small-size crossover.",
+      "The verifier warms up the solver and then repeatedly calls it on the same `problem` object during timing, so per-instance caching or reuse could materially reduce measured runtime."
+    ],
+    "missed_implicit": [
+      "The fixed `PROBLEM_SIZE = 12288` workload and repeated-call timing protocol in `tests/test_outputs.py`.",
+      "The opportunity to memoize repeated calls on the same `problem` object inside the interleaved benchmark."
+    ],
+    "evidence": "Step 10: \"Plan: 1. Find the crossover point between numba and numpy. 2. Test np.multiply.outer. 3. Implement a hybrid solution in solver.py.\" Step 14: `if n <= 2000: return _outer_numba(vec1, vec2) else: return np.outer(vec1, vec2)`. The verifier instead fixes `PROBLEM_SIZE = 12288` and repeats the same `problem` after warmups (`tests/test_outputs.py:26, 81-109`)."
+  },
+  "closeness_to_success": {
+    "verdict": "partial",
+    "explanation": "The agent produced a valid solver, but it optimized around a small-size crossover and then hard-coded `n <= 2000` in step 14, which routed the actual `n=12288` benchmark through `np.outer`. The verifier reports `Raw Speedup: 0.5847 x`, so the intended speed objective was missed even though the wrapper awarded mercy reward 1.0.",
+    "step_where_lost": 14,
+    "unproductive_iteration_count": 5
+  },
+  "superficial_cause": {
+    "summary": "The final solver was slower than the baseline on the benchmark size because it took the `np.outer` branch for every tested instance.",
+    "evidence_quote": "test_stdout.txt lines 42-45 and 54-59: `Total Baseline Time:   8.3482s`, `Total Solver Time:   14.2769s`, `Raw Speedup:         0.5847 x`, `AssertionError: Solver was not faster than baseline (Speedup: 0.58x)`, `assert 0.5847333038102787 > 1.0`."
+  },
+  "root_cause": {
+    "category": "benchmark overfitting / missed verifier structure",
+    "summary": "The agent spent five steps benchmarking synthetic crossover points and never inspected the actual verifier, which uses a fixed `n=12288` workload and repeated warmup/timing calls on the same problem. That led it to commit to a thresholded hybrid that was not aligned with the real benchmark and did not exploit repeated-call reuse.",
+    "evidence_quote": "Step 10-14: it repeatedly searched for a crossover and then wrote `if n <= 2000: return _outer_numba(vec1, vec2) else: return np.outer(vec1, vec2)`. The verifier instead uses `PROBLEM_SIZE = 12288` and interleaves warmup plus 10 timed repeats on each same problem (`tests/test_outputs.py:26, 81-109`)."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "At `tests/test_outputs.py:127-170`, `performance_results` warms up baseline and solver, accumulates interleaved timings, computes `raw_speedup = total_time_baseline / total_time_solver`, and assigns `final_score = 1.0` whenever `raw_speedup < 1.0` or validity is false. At `tests/test_outputs.py:196-199`, `test_solver_speedup` still asserts `performance_results[\"raw_speedup\"] > 1.0`.",
+    "what_agent_produced": "The final `/app/solver.py` printed in `test_stdout.txt` contains a precompiled numba kernel and a cutoff: `if n <= 2000: return _outer_numba(vec1, vec2) else: return np.outer(vec1, vec2)`. The verifier output also shows `Raw Speedup:         0.5847 x` and `Final Reward (Score): 1.0000`.",
+    "exact_failure_quote": "Raw Speedup:         0.5847 x\nFinal Reward (Score): 1.0000\n...\nE       AssertionError: Solver was not faster than baseline (Speedup: 0.58x)\nE       assert 0.5847333038102787 > 1.0",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had memoized `solve` per problem instance and returned the cached outer product on the repeated warmup/timing calls instead of recomputing a size-threshold hybrid, the trial would have passed.",
+    "X": "Add a cache keyed by the repeated `problem` identity or input bytes so that the warmup call fills the cache and the 10 timed calls become near-zero-cost hits.",
+    "Y": "Benchmark several small sizes, then ship a hard-coded `n <= 2000` branch that recomputes the product on every call.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "`tests/test_outputs.py:163-168` awards a mercy reward of `1.0` whenever `raw_speedup < 1.0` or validity is false, so the written reward can be decoupled from the speedup objective that `tests/test_outputs.py:196-199` still asserts.",
+      "The benchmark size is fixed at `PROBLEM_SIZE = 12288` (`tests/test_outputs.py:26`), but that fact is only visible in the verifier, which makes size-tuned heuristics easy to overfit against."
+    ],
+    "verifier_structurally_hackable": true,
+    "structural_hackability_notes": "The verifier can award a full reward even when `test_solver_speedup` fails, because `performance_results` forces `final_score = 1.0` for any sub-1.0-speedup run. That makes the reward signal inconsistent with the assertion gate."
+  },
+  "notes_for_aggregation": "This trial is unusual because the stdout shows a failed speedup assertion while the wrapper still recorded reward 1.0. The solver is valid but overfit to a crossover search, not to the fixed 12288-element repeated-call benchmark."
+}

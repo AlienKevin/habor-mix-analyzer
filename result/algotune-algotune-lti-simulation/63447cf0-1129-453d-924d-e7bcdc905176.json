@@ -1,0 +1,70 @@
+{
+  "task": {
+    "id": "algotune-algotune-lti-simulation",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "63447cf0-1129-453d-924d-e7bcdc905176",
+    "harness": "claude-code",
+    "model": "deepseek-v4-pro[1m]",
+    "reward": 0.0,
+    "exception_type": null,
+    "n_steps": 128
+  },
+  "task_summary": "Implement a fast `Solver.solve` for continuous-time LTI simulation that returns `{\"yout\": ...}` matching `scipy.signal.lsim`. The verifier generates 100 large synthetic problems and scores by speedup over the reference implementation.",
+  "instructions": {
+    "explicit": [
+      "Define a class named `Solver` in `/app/solver.py` with a `solve(self, problem, **kwargs)` method that returns a dictionary containing a `yout` list.",
+      "Make the implementation faster than the reference while preserving numerical agreement with the reference output."
+    ],
+    "implicit": [
+      "The verifier imports `/app/solver.py` with `importlib.util.spec_from_file_location(...)` and instantiates `Solver()`, so the module must import cleanly in a fresh process.",
+      "The solver must not rely on verifier state or a preloaded module cache; the first construction path is exercised during warmup."
+    ],
+    "missed_implicit": [
+      "The solver must import and instantiate cleanly in a fresh verifier process."
+    ],
+    "evidence": "tests/test_outputs.py:38-47 loads `/app/solver.py` via `spec_from_file_location(\"solver\", SOLVER_PATH)` and returns `solver_module.Solver()`. In the trial, the final solver used `@jit(nopython=True, cache=True)` and called `_simulate_foh(...)` in `__init__` (trajectory step 123), then the verifier failed with `ModuleNotFoundError: No module named 'solver'` (test_stdout lines 115-152)."
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The numerical solver itself was correct by the agent's own checks: at step 120 it reported all 8 local cases passing and 36-52x speedup. The trial failed only when the verifier imported the module in a fresh process and hit the numba cache/import-time warmup bug, so the path was lost at the final packaging/runtime step rather than in the LTI math.",
+    "step_where_lost": 123,
+    "unproductive_iteration_count": 0
+  },
+  "superficial_cause": {
+    "summary": "The verifier could not instantiate `Solver()` because the final solver crashed while Numba was loading a cached compiled function.",
+    "evidence_quote": "test_stdout.txt lines 115-152: `solver.py:41: in __init__` ... `ModuleNotFoundError: No module named 'solver'`."
+  },
+  "root_cause": {
+    "category": "import-time numba cache side effect",
+    "summary": "The agent shipped a correct FOH-based implementation, but wrapped it in a cached numba JIT and an eager warmup call inside `__init__`. That turns module import into a cache-resolution path, and the verifier's fresh-process import exposed the failure before any correctness check ran.",
+    "evidence_quote": "trajectory step 123 shows `@jit(nopython=True, cache=True)` at line 8 and `_simulate_foh(Ad, Bd0, Bd1, C_vec, D_val, u, y)` in `Solver.__init__` at lines 31-42."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "tests/test_outputs.py:38-47 imports `/app/solver.py` and instantiates `Solver()`. Lines 81-94 warm up the solver and treat any exception as invalidity; lines 127-199 then require `validity == True` and `raw_speedup > 1.0`.",
+    "what_agent_produced": "The submitted solver printed by the verifier is a numba JIT solution with `@jit(nopython=True, cache=True)` and a warmup call in `__init__` before `solve()` (test_stdout lines 1-88).",
+    "exact_failure_quote": "ModuleNotFoundError: No module named 'solver'",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had removed `cache=True` from the numba decorator instead of keeping an import-time cached warmup, the trial would have passed.",
+    "X": "Use `@jit(nopython=True)` without `cache=True` on `_simulate_foh`.",
+    "Y": "Kept `@jit(nopython=True, cache=True)` and invoked `_simulate_foh(...)` inside `Solver.__init__`.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept",
+    "issues": [],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This trial is a clean near-miss: the agent's algorithmic work succeeded locally, but the verifier failed during module instantiation because of a numba cache/import-time side effect. Aggregations should separate cold-start packaging failures from numeric-correctness failures on this task."
+}

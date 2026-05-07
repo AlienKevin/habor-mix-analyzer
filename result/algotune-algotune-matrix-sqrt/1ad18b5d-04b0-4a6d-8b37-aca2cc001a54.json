@@ -1,0 +1,71 @@
+{
+  "task": {
+    "id": "algotune-algotune-matrix-sqrt",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "1ad18b5d-04b0-4a6d-8b37-aca2cc001a54",
+    "harness": "claude-code",
+    "model": "glm-5.1",
+    "reward": 2.1022,
+    "exception_type": "AgentTimeoutError",
+    "n_steps": 66
+  },
+  "task_summary": "The agent was asked to implement `/app/solver.py` with a `Solver.solve` method that computes the principal matrix square root of a complex square matrix. The benchmark scores speed on 100 hidden 192x192 complex instances against a SciPy baseline.",
+  "instructions": {
+    "explicit": [
+      "Define `class Solver` in `/app/solver.py` with a `solve(self, problem, **kwargs)` entrypoint.",
+      "Return the principal square root `X` for the input matrix `A`, and make it faster than the reference implementation while respecting the runtime limit."
+    ],
+    "implicit": [
+      "The verifier uses 100 random complex matrices of size 192x192, not the example in the prompt.",
+      "Correctness is checked with `task.is_solution` before any speedup is counted, so `X @ X` must reconstruct `A` within tolerance.",
+      "The score is based on interleaved minimum timings across repeated runs, so warmup and stable runtime behavior matter."
+    ],
+    "missed_implicit": [],
+    "evidence": "Step 53: `X@X close to A: True`; step 54: `n=100: ours=0.1006s, scipy=0.1998s, speedup=1.99x, valid=True`; `tests/test_outputs.py:83-91` and `tests/test_outputs.py:156-170` show the hidden correctness gate and speedup calculation."
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The final solver was valid and the verifier passed, but the agent kept running benchmark sweeps after the correct implementation had already been written at step 52 and validated at step 53. Those extra steps consumed the remaining hour and ended in `AgentTimeoutError` at the agent layer.",
+    "step_where_lost": 54,
+    "unproductive_iteration_count": 12
+  },
+  "superficial_cause": {
+    "summary": "The visible operational mistake was continuing to benchmark after a correct solver was already in place, instead of stopping and letting the passing implementation stand.",
+    "evidence_quote": "Step 53: `X@X close to A: True`; step 54: `python3 -c \"... # Benchmark our solver vs scipy for various sizes ...\"`; step 65: `Wait, n=100 numpy is 0.46s but torch is 0.013s?! ... let me verify`."
+  },
+  "root_cause": {
+    "category": "post-solution overexploration",
+    "summary": "The deeper failure mode was spending most of the session on iterative micro-benchmarks and threshold tuning after already finding a correct, fast-enough hybrid solver. The solver itself was not the problem; the time budget was lost to unnecessary post-validation search.",
+    "evidence_quote": "Step 52 wrote a working hybrid solver; steps 54-65 kept launching new benchmarks such as `Benchmark our solver vs scipy for various sizes`, `Let me adjust threshold`, and `torch.no_grad() dramatically reduces variance!`."
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "`tests/test_outputs.py:26-29` sets `PROBLEM_SIZE = 192`, `NUM_TEST_INSTANCES = 100`, `NUM_REPEATS = 10`, and `NUM_WARMUPS = 1`; `tests/test_outputs.py:83-91` warm up and reject invalid outputs via `task.is_solution`; `tests/test_outputs.py:156-170` compute `raw_speedup` and `tests/test_outputs.py:196-199` require `raw_speedup > 1.0`.",
+    "what_agent_produced": "The final solver written at step 52 used `if n < 50: d, V = np.linalg.eig(A)` and `else: A_t = torch.tensor(A, dtype=torch.complex128); d_t, V_t = torch.linalg.eig(A_t)` before returning `{\"sqrtm\": {\"X\": X.tolist()}}`. The verifier summary later printed `Validity: True`, `Raw Speedup:         2.1022 x`, and `Final Reward (Score): 2.1022`.",
+    "exact_failure_quote": "PASSED ../tests/test_outputs.py::test_solver_exists\nPASSED ../tests/test_outputs.py::test_solver_validity\nPASSED ../tests/test_outputs.py::test_solver_speedup\nFinal Reward (Score): 2.1022",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had stopped after writing and validating the hybrid solver at step 53 instead of continuing to benchmark thresholds and torch variance, the trial would have ended cleanly without the agent timeout.",
+    "X": "Keep the step-52 solver, accept the step-53 correctness check, and terminate or submit immediately.",
+    "Y": "Launch additional benchmark commands at steps 54-65 to compare scipy, numpy, and torch variants.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept_with_caveats",
+    "issues": [
+      "The score uses a single fixed problem size (192) and a min-over-10 timing protocol, so runtime noise and threshold tuning have a strong effect on the reward."
+    ],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This trial is a solved benchmark with an operational timeout: the agent reached a passing solver, then spent the rest of the hour on extra benchmarking. Aggregators should treat the timeout as post-solution overhead, not as a correctness failure."
+}

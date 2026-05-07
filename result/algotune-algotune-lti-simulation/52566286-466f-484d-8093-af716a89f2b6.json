@@ -1,0 +1,68 @@
+{
+  "task": {
+    "id": "algotune-algotune-lti-simulation",
+    "benchmark": "algotune",
+    "task_broken": false,
+    "broken_reason": null
+  },
+  "trial": {
+    "id": "52566286-466f-484d-8093-af716a89f2b6",
+    "harness": "terminus-2",
+    "model": "gpt-5.5",
+    "reward": 149.7954,
+    "exception_type": null,
+    "n_steps": 8
+  },
+  "task_summary": "The agent had to implement `/app/solver.py` with a `Solver.solve` method that simulates a continuous-time LTI transfer-function system and returns `{\"yout\": ...}` matching `scipy.signal.lsim`, but faster than the reference implementation.",
+  "instructions": {
+    "explicit": [
+      "Define `class Solver` in `/app/solver.py` with `solve(self, problem, **kwargs) -> Any`.",
+      "Return a dictionary with a `\"yout\"` list matching `scipy.signal.lsim`, while making the solver faster than the reference."
+    ],
+    "implicit": [
+      "The verifier loads `/app/solver.py`, so the solution must be present there and import cleanly.",
+      "The benchmark measures validity and runtime on 100 fixed problems of size 24576, so the implementation must handle long 1-D inputs efficiently and preserve exact output length and finiteness."
+    ],
+    "missed_implicit": [],
+    "evidence": ""
+  },
+  "closeness_to_success": {
+    "verdict": "near-miss",
+    "explanation": "The trial ultimately passed, but the agent spent steps 3-5 on an incorrect FOH/lfilter fast path. The path was lost at step 5, when its own randomized self-check failed on a degree-5 case, and it recovered only after switching to the numba state-space recurrence in step 6.",
+    "step_where_lost": 5,
+    "unproductive_iteration_count": 2
+  },
+  "superficial_cause": {
+    "summary": "The first fast path was numerically wrong on some cases: the agent's own check failed on a randomized degree-5 system before the final redesign.",
+    "evidence_quote": "Step 5: `FAIL 5 0 1.8430313437726997e-08 [ 1.09412301  0.44282877 -0.55121883 -1.35885564] [  1.          12.14258707  58.64272259 140.84205162 168.25977991  80.01289479]`"
+  },
+  "root_cause": {
+    "category": "wrong fast-path model",
+    "summary": "The agent initially optimized the problem as a discrete FOH/lfilter transfer-function simulation, which did not preserve the exact `lsim` behavior for all inputs. Step 6 corrected the model by using the same state-space recurrence as `scipy.signal.lsim` and accelerating the loop with numba.",
+    "evidence_quote": "Step 5: `The first implementation is very fast but incorrect when u[0] is nonzero. FOH cont2discrete/lfilter with zero initial discrete state assumes a transformed FOH state z0=0, while scipy lsim corresponds to z0=-G*u0; when u[0]=0 they matched.` Step 6: `we should simulate the same state-space recurrence used by scipy.signal.lsim, but execute the time loop in numba.`"
+  },
+  "failing_test_evidence": {
+    "what_verifier_checks": "`/data/trial-codex-analyze/task_dataset/harbor-mix/datasets/daytona/algotune-algotune-lti-simulation/tests/test_outputs.py:127-170, 190-199` generates 100 fixed problems with `task.generate_problem(n=24576, random_seed=i)`, warms up the baseline and solver, rejects invalid outputs, and asserts `raw_speedup > 1.0`.",
+    "what_agent_produced": "`/data/trial-codex-analyze/harbor-mix-trials/trials_extracted/algotune-algotune-lti-simulation/52566286-466f-484d-8093-af716a89f2b6/test_stdout.txt:1-157` shows the final solver using `_simulate_foh_siso`, `_lsim_foh_mats`, `signal.tf2ss`, `linalg.expm`, and a numba-compiled recurrence; the verifier then reports `Validity: True`, `Raw Speedup:         149.7954 x`, and `Final Reward (Score): 149.7954`.",
+    "exact_failure_quote": "",
+    "test_stdout_available": true
+  },
+  "reward_hacking": {
+    "verdict": "clean",
+    "categories_triggered": [],
+    "evidence": ""
+  },
+  "super_capable_counterfactual": {
+    "claim": "If the agent had done the exact state-space recurrence from `scipy.signal.lsim` in step 4 instead of the FOH/lfilter surrogate, the first implementation would have passed.",
+    "X": "Implement the exact `lsim` recurrence with cached matrix exponentials and a numba-compiled time loop, which was already accessible from the scipy source inspected in step 2.",
+    "Y": "Stay on the FOH/lfilter discrete-transfer-function path introduced in steps 3-5.",
+    "single_step_fix": true
+  },
+  "task_quality": {
+    "verdict": "accept",
+    "issues": [],
+    "verifier_structurally_hackable": false,
+    "structural_hackability_notes": null
+  },
+  "notes_for_aggregation": "This trial is notable for a two-stage recovery: the agent first pursued a fast but inaccurate discrete filter, then switched to a correct numba-accelerated state-space recurrence and earned a large speedup rather than a minimal pass."
+}
