@@ -33,14 +33,15 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
 
-ROOT = Path("/data/trial-codex-analyze/harbor-mix-trials")
+REPO_ROOT = Path(__file__).resolve().parent
+ROOT = REPO_ROOT / "harbor-mix-trials"
 TRIALS_ROOT = ROOT / "trials_extracted"
 UPLOADED_TRIALS = ROOT / "uploaded_trials.jsonl"
 
 # Sparse-clone of harbor-framework/harbor-adapters-experiments. Each task lives
 # at <TASK_DATASET_ROOT>/{daytona,modal}/<daytona_name>/ and contains
 # instruction.md, tests/, solution/solve.sh, environment/, task.toml.
-TASK_DATASET_ROOT = Path("/data/trial-codex-analyze/task_dataset/harbor-mix/datasets")
+TASK_DATASET_ROOT = REPO_ROOT / "task_dataset" / "harbor-mix" / "datasets"
 
 DEFAULT_PROMPT_TEMPLATE = """\
 You are auditing ONE trial of a Harbor-Mix benchmark task. Produce a

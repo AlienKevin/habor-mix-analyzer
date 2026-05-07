@@ -36,7 +36,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-ROOT = Path("/data/trial-codex-analyze/harbor-mix-trials")
+ROOT = Path(__file__).resolve().parent / "harbor-mix-trials"
 TRIALS_ROOT = ROOT / "trials_extracted"
 SUPABASE_URL = "https://hnkceovsiaczvcwhdlkb.supabase.co/storage/v1/object/public/trials/{trial_id}.tar.gz"
 
