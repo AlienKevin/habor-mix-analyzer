@@ -1,0 +1,456 @@
+{
+  "task_id": "swebenchpro-fix-ansible-invalid-hosts",
+  "n_trials": 3,
+  "verdicts": [
+    {
+      "rollout_id": "swebenchpro-fix-ansible-invalid-hosts__fXwzDD2",
+      "task_id": "swebenchpro-fix-ansible-invalid-hosts",
+      "trial_id": "fXwzDD2",
+      "agent_model": "anthropic/claude-opus-4-8",
+      "harness": "claude-code",
+      "benchmark": "swebenchpro",
+      "verifier_signal": {
+        "binary_reward": 0,
+        "reward": null,
+        "status": null,
+        "reward_metric": null
+      },
+      "judge_verdict": {
+        "task_truly_solved": true,
+        "confidence": "high",
+        "summary": "The agent implemented the correct Play hosts validation fix, but the verifier spuriously failed because staging the gold test patch aborted after the agent had already applied the same runme.sh change."
+      },
+      "outcome_class": "FN",
+      "outcome_rationale": "This is a spurious verifier failure on a genuinely solved task. The verifier reported binary_reward 0 because test.sh exited with \"ERROR: test_patch apply failed\" before running any unit tests [1][2][3]. The task required moving hosts name derivation into get_name, adding _validate_hosts with specific AnsibleParserError messages, and using is_sequence for sequence checks [4], and the hidden reference patch implements exactly that in lib/ansible/playbook/play.py [5]. The agent's final play.py matches that reference: it adds _validate_hosts with the specified error messages, rewrites get_name to join sequence hosts lazily, and removes the name-mutating logic from Play.load [6]. After the fix, loading a playbook with a mapping in hosts raises AnsibleParserError instead of the original TypeError [9]. The verifier never graded this code because the gold test_patch could not apply to test/integration/targets/playbook/runme.sh: the patch still searched for the old dash-formatted empty-hosts message while the agent had already updated that grep line to the new period-formatted message in step 15 [7][8], and test.sh treats any patch-application failure as fatal [3]. The agent's self-checks only ran the ten legacy unittest cases in the base test_play.py and did not exercise the 17 fail_to_pass parametrized host-validation tests the verifier would have staged [10][11], but the submitted production fix is substantively complete and equivalent to the reference solution [5][6], so the FAIL is a harness staging issue rather than a missing or incorrect fix.",
+      "evidence": [
+        {
+          "claim": "The verifier assigned binary_reward 0 (FAIL).",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "meta.json",
+              "line_start": 8,
+              "line_end": 12,
+              "quote": "\"verifier_signal\": {\n    \"binary_reward\": 0,"
+            }
+          ]
+        },
+        {
+          "claim": "Verification aborted during gold test_patch application with 'ERROR: test_patch apply failed' and never proceeded to test execution.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "trial/test_stdout.txt",
+              "line_start": 1,
+              "line_end": 31,
+              "quote": "Applying test_patch to stage gold test files\n...\nERROR: test_patch apply failed"
+            }
+          ]
+        },
+        {
+          "claim": "test.sh treats any failure to apply the gold test_patch as a fatal error that exits before run_script.sh is invoked.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/tests/test.sh",
+              "line_start": 41,
+              "line_end": 46,
+              "quote": "if [ -s /tmp/_gold_test_patch.diff ]; then\n    echo \"Applying test_patch to stage gold test files\"\n    git apply --whitespace=nowarn /tmp/_gold_test_patch.diff \\\n        || git apply --whitespace=nowarn --reject /tmp/_gold_test_patch.diff \\\n        || patch --fuzz=5 -p1 -i /tmp/_gold_test_patch.diff \\\n        || { echo \"ERROR: test_patch apply failed\"; exit 1; }"
+            }
+          ]
+        },
+        {
+          "claim": "The task requires _validate_hosts with specific AnsibleParserError messages, lazy name derivation in get_name using is_sequence, and no name mutation in Play.load.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/instruction.md",
+              "line_start": 54,
+              "line_end": 63,
+              "quote": "- The `Play.load` method should not mutate or derive the `name` field from the `hosts` field; it should only load data and leave name derivation to `get_name`.\n...\n- The function `ansible.module_utils.common.collections.is_sequence` should be used to decide whether `hosts` is a sequence."
+            }
+          ]
+        },
+        {
+          "claim": "The reference solution patch adds _validate_hosts, rewrites get_name, removes name derivation from Play.load, and imports is_sequence/binary_type/text_type.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/solution/solve.sh",
+              "line_start": 36,
+              "line_end": 76,
+              "quote": "+    def _validate_hosts(self, attribute, name, value):\n+        # Only validate 'hosts' if a value was passed in to original data set.\n+        if 'hosts' in self._ds:\n...\n+        if is_sequence(self.hosts):\n+            self.name = ','.join(self.hosts)\n...\n-            if isinstance(data['hosts'], list):\n-                data['name'] = ','.join(data['hosts'])"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's final play.py implements the same _validate_hosts, get_name, and load changes with matching error messages.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                16
+              ],
+              "quote": "def _validate_hosts(self, attribute, name, value):\n        # Only validate 'hosts' if a value was passed in to original data set.\n        if 'hosts' in self._ds:\n            if not value:\n                raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\")"
+            }
+          ]
+        },
+        {
+          "claim": "In step 15 the agent preemptively updated runme.sh to expect the new period-formatted empty-hosts error message.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                15
+              ],
+              "quote": "I'll update the integration test to match the new message and the period-vs-dash change."
+            }
+          ]
+        },
+        {
+          "claim": "The gold test_patch still expected the old dash-formatted grep string in runme.sh, causing the patch hunk at line 35 to fail against the agent's already-updated file.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "trial/test_stdout.txt",
+              "line_start": 7,
+              "line_end": 16,
+              "quote": "error: while searching for:\nset +e\nresult=\"$(ansible-playbook -i ../../inventory empty_hosts.yml -v \"$@\" 2>&1)\"\nset -e\ngrep -q \"ERROR! Hosts list cannot be empty - please check your playbook\" <<< \"$result\""
+            }
+          ]
+        },
+        {
+          "claim": "After implementing the fix, loading a play with a non-string mapping in hosts raises AnsibleParserError with an invalid-host-value message instead of crashing with TypeError.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                9
+              ],
+              "quote": "ansible.errors.AnsibleParserError: Hosts list contains an invalid host value: '{'test': '^ this breaks things'}'"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's self-verification only collected and passed ten legacy unittest cases from the base test_play.py, not the expanded gold test suite.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                12
+              ],
+              "quote": "collected 10 items"
+            }
+          ]
+        },
+        {
+          "claim": "The verifier's fail_to_pass set lists 17 parametrized host-validation unit tests in test/units/playbook/test_play.py that the gold test_patch would stage.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/tests/config.json",
+              "line_start": 11,
+              "line_end": 11,
+              "quote": "\"fail_to_pass\": \"['test/units/playbook/test_play.py::test_play_empty_hosts[False]', 'test/units/playbook/test_play.py::test_play_invalid_hosts_sequence[1]',"
+            }
+          ]
+        }
+      ],
+      "verifier_or_task_concern": "The verifier harness aborts entirely when test_patch cannot apply cleanly; if the agent legitimately updates runme.sh to the same new error-message string the test_patch would introduce, git apply fails on that hunk and no unit tests run, producing a spurious FAIL despite a correct play.py fix. test.sh should tolerate already-applied test-file changes or stage only the files still needed (e.g., test_play.py) before running tests."
+    },
+    {
+      "rollout_id": "swebenchpro-fix-ansible-invalid-hosts__wAeQ3kF",
+      "task_id": "swebenchpro-fix-ansible-invalid-hosts",
+      "trial_id": "wAeQ3kF",
+      "agent_model": "gpt-5.5",
+      "harness": "codex",
+      "benchmark": "swebenchpro",
+      "verifier_signal": {
+        "binary_reward": 0,
+        "reward": null,
+        "status": null,
+        "reward_metric": null
+      },
+      "judge_verdict": {
+        "task_truly_solved": false,
+        "confidence": "high",
+        "summary": "The agent fixed the reported crash but its hosts validation misses several required edge cases, and verifier staging failed because the agent pre-edited the gold test files."
+      },
+      "outcome_class": "TN",
+      "outcome_rationale": "This is a genuine agent-fault failure where the verifier's FAIL is correct. The verifier never reached pytest grading: it aborted while applying the held-out test_patch because the agent had already modified `test/units/playbook/test_play.py` and `test/integration/targets/playbook/runme.sh`, so hunks for the gold pytest suite could not apply and the harness exited with `ERROR: test_patch apply failed` and `binary_reward` 0 [1][8]. The task required removing `Play.load` name mutation, deriving names only in `get_name`, and adding `_validate_hosts` with specific `AnsibleParserError` messages for empty/invalid `hosts` values using `is_sequence` [2]. The reference fix validates with `if not value` on the original `_ds` and rejects non-text sequence entries via `isinstance(entry, (binary_type, text_type))` [3]. The agent did remove `Play.load` name derivation and added `_validate_hosts`, and its reproducer confirmed the original `TypeError` on invalid mapping hosts [6] was replaced by a friendly `AnsibleParserError` for that case [10]; however its validator only treats `value is None` as empty (not other falsy hosts like `''`, `False`, `0`, `set()`, `{}`), and it uses `is_string` which explicitly treats `AnsibleVaultEncryptedUnicode` as string-like [4][7]. Those gaps mean it would still fail multiple gold `fail_to_pass` cases such as `test_play_empty_hosts[False]`, `test_play_empty_hosts[0]`, and vault-hosts parametrizations listed in the benchmark config [5][7]. The agent declared success after its own 19\u201320 unittest additions passed under pytest [9], but that suite is narrower than the 47-test gold `test_play.py` the verifier would have run, so insufficient self-checking masked the incomplete validation [5][9]. The core crash is fixed, but the full hosts-validation contract the reference and gold tests enforce is not met, so this is TN not FN.",
+      "evidence": [
+        {
+          "claim": "The verifier reported failure (binary_reward 0) because test_patch could not be applied to stage gold tests, aborting before any graded test run.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "meta.json",
+              "line_start": 9,
+              "line_end": 9,
+              "quote": "\"binary_reward\": 0,"
+            },
+            {
+              "kind": "file",
+              "file": "trial/test_stdout.txt",
+              "line_start": 1,
+              "line_end": 7,
+              "quote": "Applying test_patch to stage gold test files\nwarning: test/integration/targets/playbook/runme.sh has type 100644, expected 100755\nerror: patch failed: test/integration/targets/playbook/runme.sh:35"
+            },
+            {
+              "kind": "file",
+              "file": "trial/test_stdout.txt",
+              "line_start": 157,
+              "line_end": 157,
+              "quote": "ERROR: test_patch apply failed"
+            }
+          ]
+        },
+        {
+          "claim": "The instruction requires Play.load to stop mutating name from hosts, dynamic get_name behavior, and a new _validate_hosts with specific AnsibleParserError messages when hosts is present.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/instruction.md",
+              "line_start": 54,
+              "line_end": 63,
+              "quote": "- The `Play.load` method should not mutate or derive the `name` field from the `hosts` field; it should only load data and leave name derivation to `get_name`.\n- The `get_name` method should compute the `name` dynamically by joining elements in `hosts` with a comma when `name` is not already set and `hosts` is a sequence."
+            }
+          ]
+        },
+        {
+          "claim": "The reference solution treats any falsy hosts value as empty via `if not value` and rejects non-text sequence entries with isinstance(binary_type, text_type), keyed on `'hosts' in self._ds`.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/solution/solve.sh",
+              "line_start": 36,
+              "line_end": 51,
+              "quote": "if 'hosts' in self._ds:\n            if not value:\n                raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\")\n\n            if is_sequence(value):\n                for entry in value:\n                    if entry is None:\n                        raise AnsibleParserError(\"Hosts list cannot contain values of 'None'. Please check your playbook\")\n                    elif not isinstance(entry, (binary_type, text_type)):\n                        raise AnsibleParserError(\"Hosts list contains an invalid host value: '{host!s}'\".format(host=entry))"
+            }
+          ]
+        },
+        {
+          "claim": "Ansible's is_string helper treats AnsibleVaultEncryptedUnicode as string-like via __ENCRYPTED__, so using is_string in host-element validation accepts vault values the gold tests expect to reject.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "/app/lib/ansible/module_utils/common/collections.py",
+              "line_start": 68,
+              "line_end": 71,
+              "quote": "def is_string(seq):\n    \"\"\"Identify whether the input has a string-like type (inclding bytes).\"\"\"\n    # AnsibleVaultEncryptedUnicode inherits from Sequence, but is expected to be a string like object\n    return isinstance(seq, (text_type, binary_type)) or getattr(seq, '__ENCRYPTED__', False)"
+            }
+          ]
+        },
+        {
+          "claim": "The benchmark's fail_to_pass set includes parametrized empty-host and vault-host cases that depend on the reference's broader falsy-empty and strict type checks.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/tests/config.json",
+              "line_start": 11,
+              "line_end": 11,
+              "quote": "\"fail_to_pass\": \"['test/units/playbook/test_play.py::test_play_empty_hosts[False]', 'test/units/playbook/test_play.py::test_play_invalid_hosts_sequence[1]', ... 'test/units/playbook/test_play.py::test_play_invalid_hosts_value[value5]']\""
+            }
+          ]
+        },
+        {
+          "claim": "Before patching, the agent reproduced the original TypeError from joining non-string hosts in Play.load.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                16
+              ],
+              "quote": "TypeError: sequence item 1: expected str instance, AnsibleMapping found"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's final _validate_hosts only raises empty-host errors for `value is None` or zero-length sequences, and uses is_string for element/type checks rather than the reference's falsy-empty and binary/text isinstance logic.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                73
+              ],
+              "quote": "if value is None:\n            raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\", obj=ds)\n\n        if is_sequence(value):\n            if len(value) == 0:\n                raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\", obj=ds)\n\n            for host in value:\n                if host is None:\n                    raise AnsibleParserError(\"Hosts list cannot contain values of 'None'. Please check your playbook\", obj=ds)\n                elif not is_string(host):\n                    raise AnsibleParserError(\"Hosts list contains an invalid host value: '%s'\" % host, obj=ds)\n        elif not is_string(value):\n            raise AnsibleParserError(\"Hosts list must be a sequence or string. Please check your playbook.\", obj=ds)"
+            }
+          ]
+        },
+        {
+          "claim": "The agent modified the same test files the verifier's test_patch targets, preventing gold test staging.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                73
+              ],
+              "quote": " M lib/ansible/playbook/play.py\n M test/integration/targets/playbook/runme.sh\n M test/units/playbook/test_play.py"
+            },
+            {
+              "kind": "file",
+              "file": "trial/test_stdout.txt",
+              "line_start": 19,
+              "line_end": 26,
+              "quote": "Checking patch test/units/playbook/test_play.py...\nerror: while searching for:\nfrom __future__ import (absolute_import, division, print_function)\n__metaclass__ = type\n\nfrom units.compat import unittest"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's self-verification ran only its augmented unittest file (19\u201320 collected tests) and declared success, not the broader gold pytest suite.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                50
+              ],
+              "quote": "collected 19 items\n\ntest/units/playbook/test_play.py ...................                     [100%]"
+            },
+            {
+              "kind": "trajectory",
+              "steps": [
+                66
+              ],
+              "quote": "collected 20 items\n\ntest/units/playbook/test_play.py ....................                    [100%]"
+            }
+          ]
+        },
+        {
+          "claim": "The agent did fix the primary reported crash path: invalid mapping hosts now raise AnsibleParserError instead of TypeError.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                66
+              ],
+              "quote": "fixed: got friendly parser error: Hosts list contains an invalid host value: '{'test': '^ this breaks things'}'"
+            }
+          ]
+        }
+      ],
+      "verifier_or_task_concern": null
+    },
+    {
+      "rollout_id": "swebenchpro-fix-ansible-invalid-hosts__GMrojjN",
+      "task_id": "swebenchpro-fix-ansible-invalid-hosts",
+      "trial_id": "GMrojjN",
+      "agent_model": "gemini/gemini-3.1-pro-preview",
+      "harness": "gemini-cli",
+      "benchmark": "swebenchpro",
+      "verifier_signal": {
+        "binary_reward": 0,
+        "reward": null,
+        "status": null,
+        "reward_metric": null
+      },
+      "judge_verdict": {
+        "task_truly_solved": false,
+        "confidence": "high",
+        "summary": "The agent partially fixed hosts validation but left four falsy edge cases raising the wrong error, so the verifier's FAIL is correct."
+      },
+      "outcome_class": "TN",
+      "outcome_rationale": "This was a genuine agent-fault failure (TN): the verifier correctly awarded reward 0 after staging the gold test patch and finding 43/47 required tests passing, with four failures all in parametrized `test_play_empty_hosts` cases for `hosts` values `set()`, `{}`, `False`, and `0` [1]. The task required `_validate_hosts` to raise `AnsibleParserError` with \"Hosts list cannot be empty\" when `hosts` is present but empty or `None` [2], and the gold tests assert that same substring for every falsy value including those four [3]; the reference solution satisfies this with a single `if not value` guard before sequence/type checks [4]. The agent made a substantial partial fix\u2014removing `Play.load` name mutation, adding dynamic `get_name`, and implementing `_validate_hosts`\u2014but its empty-host branch only catches `None`, empty strings, and empty sequences via explicit per-type checks, so falsy scalars and non-sequence containers like `0`, `False`, `{}`, and `set()` fall through to the separate \"Hosts list must be a sequence or string\" branch instead [5][6]. The agent even ran ad-hoc tests for `hosts: 0` and `hosts: {}` but treated that wrong error message as passing [7], and declared the task complete after only the repository's legacy 10-test `test_play.py` suite passed, which did not include the new validation parametrizations the verifier exercises [8].",
+      "evidence": [
+        {
+          "claim": "The verifier reported binary_reward 0 with four missing required tests, all parametrized `test_play_empty_hosts` cases for `0`, `set()`, `{}`, and `False`.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "trial/test_stdout.txt",
+              "line_start": 3,
+              "line_end": 9,
+              "quote": "Required tests: 47\nPassed tests: 43\nRequired tests that passed: 43\n\nRESULT: FAILED\nMissing tests: ['test/units/playbook/test_play.py::test_play_empty_hosts[0]', 'test/units/playbook/test_play.py::test_play_empty_hosts[value3]', 'test/units/playbook/test_play.py::test_play_empty_hosts[False]', 'test/units/playbook/test_play.py::test_play_empty_hosts[value2]']"
+            }
+          ]
+        },
+        {
+          "claim": "The task instruction requires `_validate_hosts` to raise `AnsibleParserError` with \"Hosts list cannot be empty\" when `hosts` is present but empty or set to `None`.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/instruction.md",
+              "line_start": 57,
+              "line_end": 58,
+              "quote": "- A new `_validate_hosts` method should be introduced in the `Play` class to handle validation of the `hosts` field, and it should perform validation only when the `hosts` key is present in the play's dataset.\n- `_validate_hosts` should raise `AnsibleParserError` when `hosts` is present but empty or set to `None`, with the message: `\"Hosts list cannot be empty. Please check your playbook\"`."
+            }
+          ]
+        },
+        {
+          "claim": "The gold unit test parametrizes `test_play_empty_hosts` over `([], tuple(), set(), {}, '', None, False, 0)` and expects every case to raise with message matching \"Hosts list cannot be empty\".",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/tests/config.json",
+              "line_start": 6,
+              "line_end": 6,
+              "quote": "+@pytest.mark.parametrize('value', ([], tuple(), set(), {}, '', None, False, 0))\\n+def test_play_empty_hosts(value):\\n+    with pytest.raises(AnsibleParserError, match='Hosts list cannot be empty'):"
+            }
+          ]
+        },
+        {
+          "claim": "The reference solution treats any falsy `hosts` value as empty via `if not value` before checking sequence membership.",
+          "citations": [
+            {
+              "kind": "file",
+              "file": "task/solution/solve.sh",
+              "line_start": 38,
+              "line_end": 40,
+              "quote": "+        if 'hosts' in self._ds:\n+            if not value:\n+                raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\")"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's `_validate_hosts` only raises the empty-host error for `None`, empty strings, or empty sequences, routing other falsy values to the invalid-type error.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                31
+              ],
+              "quote": "if value is None or (isinstance(value, string_types) and not value) or (is_sequence(value) and not value):\n                raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\", obj=self._ds)\n            elif is_sequence(value):\n...\n            elif not isinstance(value, string_types):\n                raise AnsibleParserError(\"Hosts list must be a sequence or string. Please check your playbook.\", obj=self._ds)"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's final submitted patch in `lib/ansible/playbook/play.py` removed `Play.load` name derivation and added the narrower `_validate_hosts` implementation shown above.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                42
+              ],
+              "quote": "+    def _validate_hosts(self, attribute, name, value):\n+        if hasattr(self, '_ds') and 'hosts' in self._ds:\n+            if value is None or (isinstance(value, string_types) and not value) or (is_sequence(value) and not value):\n+                raise AnsibleParserError(\"Hosts list cannot be empty. Please check your playbook\", obj=self._ds)"
+            }
+          ]
+        },
+        {
+          "claim": "The agent's ad-hoc self-tests for `hosts: 0` and `hosts: {}` expected the \"must be a sequence or string\" message and reported them as PASSED.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                36,
+                37
+              ],
+              "quote": "check(\"Integer zero\", {'hosts': 0}, \"Hosts list must be a sequence or string. Please check your playbook.\")\n...\nPASSED Integer zero: Caught expected error 'Hosts list must be a sequence or string. Please check your playbook.'\n...\ncheck(\"Empty dictionary\", {'hosts': {}}, \"Hosts list must be a sequence or string. Please check your playbook.\")\n...\nPASSED Empty dictionary: Caught expected error 'Hosts list must be a sequence or string. Please check your playbook.'"
+            }
+          ]
+        },
+        {
+          "claim": "The agent declared success after running only the legacy 10-test `test/units/playbook/test_play.py` suite, which lacked the new `test_play_empty_hosts` parametrizations.",
+          "citations": [
+            {
+              "kind": "trajectory",
+              "steps": [
+                40,
+                44
+              ],
+              "quote": "collected 10 items\n...\n======================== 10 passed, 1 warning in 0.22s =========================\n...\nAll unit tests successfully pass cleanly!"
+            }
+          ]
+        }
+      ],
+      "verifier_or_task_concern": null
+    }
+  ]
+}

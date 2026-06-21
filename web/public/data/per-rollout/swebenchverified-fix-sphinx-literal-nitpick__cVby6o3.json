@@ -1,0 +1,303 @@
+{
+  "rollout_id": "swebenchverified-fix-sphinx-literal-nitpick__cVby6o3",
+  "task_id": "swebenchverified-fix-sphinx-literal-nitpick",
+  "trial_id": "cVby6o3",
+  "agent_model": "gemini/gemini-3.1-pro-preview",
+  "harness": "gemini-cli",
+  "benchmark": "swebenchverified",
+  "outcome_class": "TN",
+  "summary": "The agent partially suppressed nitpick warnings in a custom repro but left Literal values as desc_sig_keyword nodes instead of plain text, so the held-out test_parse_annotation_Literal failed and the bug was not genuinely fixed.",
+  "concern": null,
+  "downloads": {
+    "verdict": "/data/per-rollout/swebenchverified-fix-sphinx-literal-nitpick__cVby6o3.json",
+    "agent_trajectory": "/audit-traj/swebenchverified-fix-sphinx-literal-nitpick__cVby6o3/agent.json",
+    "judge_trajectory": "/audit-traj/swebenchverified-fix-sphinx-literal-nitpick__cVby6o3/judge.json",
+    "verifier_log": "/audit-traj/swebenchverified-fix-sphinx-literal-nitpick__cVby6o3/verifier.txt"
+  },
+  "verdict": {
+    "rollout_id": "swebenchverified-fix-sphinx-literal-nitpick__cVby6o3",
+    "task_id": "swebenchverified-fix-sphinx-literal-nitpick",
+    "trial_id": "cVby6o3",
+    "agent_model": "gemini/gemini-3.1-pro-preview",
+    "harness": "gemini-cli",
+    "benchmark": "swebenchverified",
+    "verifier_signal": {
+      "binary_reward": 0,
+      "reward": null,
+      "status": null,
+      "reward_metric": null
+    },
+    "judge_verdict": {
+      "task_truly_solved": false,
+      "confidence": "high",
+      "summary": "The agent partially suppressed nitpick warnings in a custom repro but left Literal values as desc_sig_keyword nodes instead of plain text, so the held-out test_parse_annotation_Literal failed and the bug was not genuinely fixed."
+    },
+    "outcome_class": "TN",
+    "outcome_rationale": "This is a genuine agent-fault failure where the verifier's FAIL is correct: the verifier ran tests/test_domain_py.py after applying the held-out test patch and reported binary_reward 0 because test_parse_annotation_Literal failed while 45 other tests passed [1][2]. The task asked to stop Sphinx nitpick from treating Literal annotation values like True as missing py:class references while keeping those values visible in the annotation [3]. The reference fix wraps Literal bracket contents with nodes.literal, uses repr() for constants, and unwraps literals before type_to_xref so the doctree contains plain text nodes like \"True\" and \"0\" [4][5]. The agent instead added unparse_literal in _parse_annotation that routes Literal slice values through desc_sig_keyword, desc_sig_literal_number, and desc_sig_literal_string nodes [6], which its own sphinx -n -W reproduction accepted as build succeeded [7] but which produces <desc_sig_keyword: 'True'> rather than the plain \"True\" string the test asserts [2][5]. The agent declared the issue fixed without exercising _parse_annotation structure and stopped [8], so the rollout did not accomplish what the reference solution and FAIL_TO_PASS test require.",
+    "evidence": [
+      {
+        "claim": "The verifier assigned binary_reward 0 (FAIL) for this rollout.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "/judge/meta.json",
+            "line_start": 8,
+            "line_end": 10,
+            "quote": "\"binary_reward\": 0"
+          }
+        ]
+      },
+      {
+        "claim": "The held-out verifier failed test_parse_annotation_Literal because _parse_annotation returned desc_sig_keyword nodes where the test expects plain text \"True\" and \"False\".",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "/judge/trial/test_stdout.txt",
+            "line_start": 60,
+            "line_end": 67,
+            "quote": "doctree = _parse_annotation(\"Literal[True, False]\", app.env)\n    assert_node(doctree, ([pending_xref, \"Literal\"],\n                          [desc_sig_punctuation, \"[\"],\n                          \"True\","
+          },
+          {
+            "kind": "file",
+            "file": "/judge/trial/test_stdout.txt",
+            "line_start": 75,
+            "line_end": 101,
+            "quote": "node = <desc_sig_keyword: <#text: 'True'>>, cls = 'True', xpath = '[2]'\n...\nE               AssertionError: The node '[2]' is not 'True': <desc_sig_keyword: <#text: 'True'>>"
+          },
+          {
+            "kind": "file",
+            "file": "/judge/trial/test_stdout.txt",
+            "line_start": 806,
+            "line_end": 807,
+            "quote": "FAILED tests/test_domain_py.py::test_parse_annotation_Literal - AssertionError: The node '[2]' is not 'True': <desc_sig_keyword: <#text: 'T...\n================== 1 failed, 45 passed"
+          }
+        ]
+      },
+      {
+        "claim": "The instruction requires Literal values to appear in annotations without triggering nitpick py:class warnings.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "/judge/task/instruction.md",
+            "line_start": 6,
+            "line_end": 8,
+            "quote": "When a value is present in a type annotation as `Literal`, sphinx will treat the value as a `py:class`. With nitpick enabled, values like `Literal[True]` end up failing, because `True` is not a class."
+          },
+          {
+            "kind": "file",
+            "file": "/judge/task/instruction.md",
+            "line_start": 26,
+            "line_end": 28,
+            "quote": "### Expected behavior\n\n`Literal[True]` (or whatever literal value) should be present in the type annotation but should not trigger the nitpick warning."
+          }
+        ]
+      },
+      {
+        "claim": "The reference solution prevents xref conversion by temporarily wrapping Literal Text nodes in nodes.literal, uses repr() for constants, and unwraps literals back to plain text before type_to_xref.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "/judge/task/solution/solve.sh",
+            "line_start": 14,
+            "line_end": 40,
+            "quote": "-                return [nodes.Text(node.value)]\n+                return [nodes.Text(repr(node.value))]\n...\n+            if result[0] in ('Literal', 'typing.Literal'):\n+                for i, subnode in enumerate(result[1:], start=1):\n+                    if isinstance(subnode, nodes.Text):\n+                        result[i] = nodes.literal('', '', subnode)\n...\n+            if isinstance(node, nodes.literal):\n+                result[i] = node[0]\n+            elif isinstance(node, nodes.Text) and node.strip():"
+          }
+        ]
+      },
+      {
+        "claim": "The held-out test_patch expects Literal values to parse as plain text strings \"True\", \"False\", \"0\", \"1\", and \"'abc'\" in the annotation doctree.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "/judge/task/tests/config.json",
+            "line_start": 6,
+            "line_end": 6,
+            "quote": "\"test_patch\": \"diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py\\n--- a/tests/test_domain_py.py\\n+++ b/tests/test_domain_py.py\\n@@ -342,6 +342,27 @@ def test_parse_annotation(app):\\n     assert_node(doctree[0], pending_xref, refdomain=\\\"py\\\", reftype=\\\"obj\\\", reftarget=\\\"None\\\")\\n \\n \\n+@pytest.mark.skipif(sys.version_info < (3, 8), reason='python 3.8+ is required.')\\n+def test_parse_annotation_Literal(app):\\n+    doctree = _parse_annotation(\\\"Literal[True, False]\\\", app.env)\\n+    assert_node(doctree, ([pending_xref, \\\"Literal\\\"],\\n+                          [desc_sig_punctuation, \\\"[\\\"],\\n+                          \\\"True\\\","
+          }
+        ]
+      },
+      {
+        "claim": "The agent's final patch added unparse_literal that emits desc_sig_keyword for booleans and desc_sig_literal_* for other constants inside Literal subscripts.",
+        "citations": [
+          {
+            "kind": "trajectory",
+            "steps": [
+              74
+            ],
+            "quote": "elif isinstance(node.value, bool):\n                return [addnodes.desc_sig_keyword('', repr(node.value))]\n            elif isinstance(node.value, (int, float)):\n                return [addnodes.desc_sig_literal_number('', repr(node.value))]"
+          },
+          {
+            "kind": "trajectory",
+            "steps": [
+              74
+            ],
+            "quote": "if isinstance(node.value, ast.Name) and node.value.id == 'Literal':\n                result.extend(unparse_literal(node.slice))\n            elif isinstance(node.value, ast.Attribute) and node.value.attr == 'Literal':\n                result.extend(unparse_literal(node.slice))"
+          }
+        ]
+      },
+      {
+        "claim": "The agent validated only a custom sphinx -n -W reproduction, which reported build succeeded for Literal[True]/Literal[False] after its patch.",
+        "citations": [
+          {
+            "kind": "trajectory",
+            "steps": [
+              56
+            ],
+            "quote": "stringify: typing.Literal[True]\nstringify: typing.Literal[False]\n...\nbuild succeeded."
+          }
+        ]
+      },
+      {
+        "claim": "The agent concluded the bug was fixed and submitted without running project tests that check _parse_annotation doctree structure.",
+        "citations": [
+          {
+            "kind": "trajectory",
+            "steps": [
+              85
+            ],
+            "quote": "I have successfully diagnosed and fixed the issue where `Literal` annotation values (like `Literal[True]`, `Literal['string']`, etc.) are improperly treated as standard types and flagged with `py:class` reference warnings in Sphinx's nitpick mode."
+          }
+        ]
+      }
+    ],
+    "verifier_or_task_concern": null
+  },
+  "evidence": [
+    {
+      "claim": "The verifier assigned binary_reward 0 (FAIL) for this rollout.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "/judge/meta.json",
+          "line_start": 8,
+          "line_end": 10,
+          "quote": "\"binary_reward\": 0"
+        }
+      ]
+    },
+    {
+      "claim": "The held-out verifier failed test_parse_annotation_Literal because _parse_annotation returned desc_sig_keyword nodes where the test expects plain text \"True\" and \"False\".",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "/judge/trial/test_stdout.txt",
+          "line_start": 60,
+          "line_end": 67,
+          "quote": "doctree = _parse_annotation(\"Literal[True, False]\", app.env)\n    assert_node(doctree, ([pending_xref, \"Literal\"],\n                          [desc_sig_punctuation, \"[\"],\n                          \"True\","
+        },
+        {
+          "kind": "file",
+          "file": "/judge/trial/test_stdout.txt",
+          "line_start": 75,
+          "line_end": 101,
+          "quote": "node = <desc_sig_keyword: <#text: 'True'>>, cls = 'True', xpath = '[2]'\n...\nE               AssertionError: The node '[2]' is not 'True': <desc_sig_keyword: <#text: 'True'>>"
+        },
+        {
+          "kind": "file",
+          "file": "/judge/trial/test_stdout.txt",
+          "line_start": 806,
+          "line_end": 807,
+          "quote": "FAILED tests/test_domain_py.py::test_parse_annotation_Literal - AssertionError: The node '[2]' is not 'True': <desc_sig_keyword: <#text: 'T...\n================== 1 failed, 45 passed"
+        }
+      ]
+    },
+    {
+      "claim": "The instruction requires Literal values to appear in annotations without triggering nitpick py:class warnings.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "/judge/task/instruction.md",
+          "line_start": 6,
+          "line_end": 8,
+          "quote": "When a value is present in a type annotation as `Literal`, sphinx will treat the value as a `py:class`. With nitpick enabled, values like `Literal[True]` end up failing, because `True` is not a class."
+        },
+        {
+          "kind": "file",
+          "file": "/judge/task/instruction.md",
+          "line_start": 26,
+          "line_end": 28,
+          "quote": "### Expected behavior\n\n`Literal[True]` (or whatever literal value) should be present in the type annotation but should not trigger the nitpick warning."
+        }
+      ]
+    },
+    {
+      "claim": "The reference solution prevents xref conversion by temporarily wrapping Literal Text nodes in nodes.literal, uses repr() for constants, and unwraps literals back to plain text before type_to_xref.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "/judge/task/solution/solve.sh",
+          "line_start": 14,
+          "line_end": 40,
+          "quote": "-                return [nodes.Text(node.value)]\n+                return [nodes.Text(repr(node.value))]\n...\n+            if result[0] in ('Literal', 'typing.Literal'):\n+                for i, subnode in enumerate(result[1:], start=1):\n+                    if isinstance(subnode, nodes.Text):\n+                        result[i] = nodes.literal('', '', subnode)\n...\n+            if isinstance(node, nodes.literal):\n+                result[i] = node[0]\n+            elif isinstance(node, nodes.Text) and node.strip():"
+        }
+      ]
+    },
+    {
+      "claim": "The held-out test_patch expects Literal values to parse as plain text strings \"True\", \"False\", \"0\", \"1\", and \"'abc'\" in the annotation doctree.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "/judge/task/tests/config.json",
+          "line_start": 6,
+          "line_end": 6,
+          "quote": "\"test_patch\": \"diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py\\n--- a/tests/test_domain_py.py\\n+++ b/tests/test_domain_py.py\\n@@ -342,6 +342,27 @@ def test_parse_annotation(app):\\n     assert_node(doctree[0], pending_xref, refdomain=\\\"py\\\", reftype=\\\"obj\\\", reftarget=\\\"None\\\")\\n \\n \\n+@pytest.mark.skipif(sys.version_info < (3, 8), reason='python 3.8+ is required.')\\n+def test_parse_annotation_Literal(app):\\n+    doctree = _parse_annotation(\\\"Literal[True, False]\\\", app.env)\\n+    assert_node(doctree, ([pending_xref, \\\"Literal\\\"],\\n+                          [desc_sig_punctuation, \\\"[\\\"],\\n+                          \\\"True\\\","
+        }
+      ]
+    },
+    {
+      "claim": "The agent's final patch added unparse_literal that emits desc_sig_keyword for booleans and desc_sig_literal_* for other constants inside Literal subscripts.",
+      "citations": [
+        {
+          "kind": "trajectory",
+          "steps": [
+            74
+          ],
+          "quote": "elif isinstance(node.value, bool):\n                return [addnodes.desc_sig_keyword('', repr(node.value))]\n            elif isinstance(node.value, (int, float)):\n                return [addnodes.desc_sig_literal_number('', repr(node.value))]"
+        },
+        {
+          "kind": "trajectory",
+          "steps": [
+            74
+          ],
+          "quote": "if isinstance(node.value, ast.Name) and node.value.id == 'Literal':\n                result.extend(unparse_literal(node.slice))\n            elif isinstance(node.value, ast.Attribute) and node.value.attr == 'Literal':\n                result.extend(unparse_literal(node.slice))"
+        }
+      ]
+    },
+    {
+      "claim": "The agent validated only a custom sphinx -n -W reproduction, which reported build succeeded for Literal[True]/Literal[False] after its patch.",
+      "citations": [
+        {
+          "kind": "trajectory",
+          "steps": [
+            56
+          ],
+          "quote": "stringify: typing.Literal[True]\nstringify: typing.Literal[False]\n...\nbuild succeeded."
+        }
+      ]
+    },
+    {
+      "claim": "The agent concluded the bug was fixed and submitted without running project tests that check _parse_annotation doctree structure.",
+      "citations": [
+        {
+          "kind": "trajectory",
+          "steps": [
+            85
+          ],
+          "quote": "I have successfully diagnosed and fixed the issue where `Literal` annotation values (like `Literal[True]`, `Literal['string']`, etc.) are improperly treated as standard types and flagged with `py:class` reference warnings in Sphinx's nitpick mode."
+        }
+      ]
+    }
+  ],
+  "outcome_rationale": "This is a genuine agent-fault failure where the verifier's FAIL is correct: the verifier ran tests/test_domain_py.py after applying the held-out test patch and reported binary_reward 0 because test_parse_annotation_Literal failed while 45 other tests passed [1][2]. The task asked to stop Sphinx nitpick from treating Literal annotation values like True as missing py:class references while keeping those values visible in the annotation [3]. The reference fix wraps Literal bracket contents with nodes.literal, uses repr() for constants, and unwraps literals before type_to_xref so the doctree contains plain text nodes like \"True\" and \"0\" [4][5]. The agent instead added unparse_literal in _parse_annotation that routes Literal slice values through desc_sig_keyword, desc_sig_literal_number, and desc_sig_literal_string nodes [6], which its own sphinx -n -W reproduction accepted as build succeeded [7] but which produces <desc_sig_keyword: 'True'> rather than the plain \"True\" string the test asserts [2][5]. The agent declared the issue fixed without exercising _parse_annotation structure and stopped [8], so the rollout did not accomplish what the reference solution and FAIL_TO_PASS test require.",
+  "judge_verdict": {
+    "task_truly_solved": false,
+    "confidence": "high",
+    "summary": "The agent partially suppressed nitpick warnings in a custom repro but left Literal values as desc_sig_keyword nodes instead of plain text, so the held-out test_parse_annotation_Literal failed and the bug was not genuinely fixed."
+  },
+  "verifier_signal": {
+    "binary_reward": 0,
+    "reward": null,
+    "status": null,
+    "reward_metric": null
+  }
+}

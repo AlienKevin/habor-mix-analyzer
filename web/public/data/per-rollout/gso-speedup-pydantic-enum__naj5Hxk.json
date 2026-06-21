@@ -1,0 +1,331 @@
+{
+  "rollout_id": "gso-speedup-pydantic-enum__naj5Hxk",
+  "task_id": "gso-speedup-pydantic-enum",
+  "trial_id": "naj5Hxk",
+  "agent_model": "anthropic/claude-opus-4-8",
+  "harness": "claude-code",
+  "benchmark": "gso",
+  "outcome_class": "TN",
+  "summary": "The agent's enum fast-path broke validation of enum-member inputs, so the verifier's functional-equivalence failure is correct.",
+  "concern": null,
+  "downloads": {
+    "verdict": "/data/per-rollout/gso-speedup-pydantic-enum__naj5Hxk.json",
+    "agent_trajectory": "/audit-traj/gso-speedup-pydantic-enum__naj5Hxk/agent.json",
+    "judge_trajectory": "/audit-traj/gso-speedup-pydantic-enum__naj5Hxk/judge.json",
+    "verifier_log": "/audit-traj/gso-speedup-pydantic-enum__naj5Hxk/verifier.txt"
+  },
+  "verdict": {
+    "rollout_id": "gso-speedup-pydantic-enum__naj5Hxk",
+    "task_id": "gso-speedup-pydantic-enum",
+    "trial_id": "naj5Hxk",
+    "agent_model": "anthropic/claude-opus-4-8",
+    "harness": "claude-code",
+    "benchmark": "gso",
+    "verifier_signal": {
+      "binary_reward": 0,
+      "reward": null,
+      "status": null,
+      "reward_metric": null
+    },
+    "judge_verdict": {
+      "task_truly_solved": false,
+      "confidence": "high",
+      "summary": "The agent's enum fast-path broke validation of enum-member inputs, so the verifier's functional-equivalence failure is correct."
+    },
+    "outcome_class": "TN",
+    "outcome_rationale": "This is a genuine agent-fault failure where the verifier's FAIL is correct. The GSO verifier applied the agent's patch, ran held-out enum workloads with equivalence checking, and aborted on gso_test_3 with `AssertionError: Mismatch at index 1: expected ONLY, got ValidationError`, recording `binary_reward: 0` and `reward: 0.0` before any speedup threshold could be met [1][2]. The task required optimizing pydantic enum validation while keeping the repository functionally equivalent and benchmark results unchanged, with passing gated on a geometric-mean speedup above 1.1 [3][4]. The agent's sole substantive change rewrote `get_enum_core_schema`'s `to_enum` to use `_value2member_map_.get` for enums with the default `_missing_`, raising `PydanticCustomError` immediately when the lookup returns `None` instead of falling back to `enum_type(input_value)` [5]. That breaks cases where `TypeAdapter.validate_python` receives an already-constructed enum member: gso_test_3's `SingleEnum` workload deliberately mixes raw values and enum instances (`valid_instances`) [6][7], so index 1 can be `SingleEnum.ONLY` which baseline accepts as `ONLY` but the fast path rejects as `ValidationError` [2][7]. The agent declared success after its self-written prompt benchmark reported an unchanged result hash (~0.10s\u2192~0.06s) and a hand-rolled edge-case script that never passed enum instances as inputs, then stopped without catching the regression [8]. Because functional equivalence is a prerequisite to the continuous speedup reward and the patch introduced a real semantic bug on enum-instance inputs, the agent did not truly solve the task and TN is the right classification.",
+    "evidence": [
+      {
+        "claim": "The verifier failed the rollout on functional equivalence in gso_test_3, reporting binary_reward 0 and reward 0.0 before speedup scoring.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "trial/test_stdout.txt",
+            "line_start": 591,
+            "line_end": 602,
+            "quote": "Traceback (most recent call last):\n  File \"/tests/gso_test_3.py\", line 318, in <module>\n    main()\n...\nAssertionError: Mismatch at index 1: expected ONLY, got ValidationError\n>>>>> Tests Errored\nopt_commit: False, binary_reward: 0, reward: 0.0"
+          },
+          {
+            "kind": "file",
+            "file": "meta.json",
+            "line_start": 8,
+            "line_end": 12,
+            "quote": "\"verifier_signal\": {\n    \"binary_reward\": 0,\n    \"reward\": null,\n    \"status\": null,\n    \"reward_metric\": null"
+          }
+        ]
+      },
+      {
+        "claim": "Held-out gso_test_3 asserts per-index output strings match a baseline reference via check_equivalence.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "task/tests/gso_test_3.py",
+            "line_start": 252,
+            "line_end": 260,
+            "quote": "def check_equivalence(reference, current):\n    \"\"\"\n    Assert that two flat lists of result strings are identical.\n    \"\"\"\n    assert len(reference) == len(current), (\n        f\"Result lengths differ: {len(reference)} vs {len(current)}\"\n    )\n    for i, (r, c) in enumerate(zip(reference, current)):\n        assert r == c, f\"Mismatch at index {i}: expected {r}, got {c}\""
+          }
+        ]
+      },
+      {
+        "claim": "The task instruction requires functional equivalence and unchanged benchmark results while optimizing runtime.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "task/instruction.md",
+            "line_start": 1,
+            "line_end": 1,
+            "quote": "A Python repository is provided at `/workspace/pydantic__pydantic`. Optimize the runtime of the following benchmark while keeping the repository functionally equivalent."
+          },
+          {
+            "kind": "file",
+            "file": "task/instruction.md",
+            "line_start": 127,
+            "line_end": 127,
+            "quote": "Optimize the benchmark as much as you can while keeping its results unchanged. Aim for the best possible speedup across repeated runs."
+          }
+        ]
+      },
+      {
+        "claim": "Passing also requires a continuous geometric-mean speedup reward strictly above threshold 1.1.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "task/tests/test.sh",
+            "line_start": 69,
+            "line_end": 73,
+            "quote": "# --- Pass/Fail Threshold Check ---\nREWARD=$(cat /logs/verifier/reward.txt 2>/dev/null || echo \"0\")\nTHRESHOLD=1.1000\nPASS=$(python3 -c \"print(1 if float('$REWARD') > $THRESHOLD else 0)\")\necho $PASS > /logs/verifier/reward.txt"
+          }
+        ]
+      },
+      {
+        "claim": "The agent replaced to_enum with a _value2member_map_.get fast path for default-_missing_ enums that raises on a None lookup without trying enum_type(input_value) for ordinary misses.",
+        "citations": [
+          {
+            "kind": "trajectory",
+            "steps": [
+              13
+            ],
+            "quote": "member_get = enum_type._value2member_map_.get\n\n        def to_enum(input_value: Any, /) -> Enum:\n            try:\n                enum_member = member_get(input_value)\n            except TypeError:\n                # Unhashable input: defer to the full lookup, which scans members by equality.\n                try:\n                    return enum_type(input_value)\n                except ValueError:\n                    enum_member = None\n            if enum_member is not None:\n                return enum_member\n            raise PydanticCustomError('enum', 'Input should be {expected}', {'expected': expected})"
+          }
+        ]
+      },
+      {
+        "claim": "gso_test_3 exercises SingleEnum (default _missing_) and feeds both raw member values and enum member instances into TypeAdapter.validate_python.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "task/tests/gso_test_3.py",
+            "line_start": 150,
+            "line_end": 151,
+            "quote": "    class SingleEnum(Enum):\n        ONLY = 5"
+          },
+          {
+            "kind": "file",
+            "file": "task/tests/gso_test_3.py",
+            "line_start": 206,
+            "line_end": 212,
+            "quote": "        for _ in range(samples_per_enum):\n            if random.random() < 0.7:\n                # Valid input: choose raw or instance\n                if random.random() < 0.5:\n                    val = random.choice(valid_values[idx])\n                else:\n                    val = random.choice(valid_instances[idx])"
+          }
+        ]
+      },
+      {
+        "claim": "The verifier's first post-patch mismatch is on SingleEnum output name ONLY versus ValidationError, consistent with rejecting a valid enum-instance input on the fast path.",
+        "citations": [
+          {
+            "kind": "file",
+            "file": "trial/test_stdout.txt",
+            "line_start": 599,
+            "line_end": 600,
+            "quote": "    assert r == c, f\"Mismatch at index {i}: expected {r}, got {c}\"\nAssertionError: Mismatch at index 1: expected ONLY, got ValidationError"
+          },
+          {
+            "kind": "file",
+            "file": "task/tests/gso_test_3.py",
+            "line_start": 228,
+            "line_end": 235,
+            "quote": "    results = []\n    for idx, val in workload:\n        adapter = adapters[idx]\n        try:\n            inst = adapter.validate_python(val)\n            results.append(inst.name)\n        except ValidationError:\n            results.append('ValidationError')"
+          }
+        ]
+      },
+      {
+        "claim": "The agent's self-checks relied on the prompt benchmark result hash and a custom script that did not cover enum-instance inputs, then concluded equivalence was preserved.",
+        "citations": [
+          {
+            "kind": "trajectory",
+            "steps": [
+              28
+            ],
+            "quote": "assert ta.validate_python(IntE.A, strict=True) is IntE.A\ntry: ta.validate_python(1, strict=True); assert False\nexcept ValidationError: pass\n\nprint('ALL EQUIVALENCE TESTS PASSED')"
+          },
+          {
+            "kind": "trajectory",
+            "steps": [
+              29
+            ],
+            "quote": "FILES IN SYNC\ntimes [0.0601, 0.0613, 0.063, 0.0618, 0.0606] min 0.0601\nhash d645ff23e42888bfcca74641eab48488"
+          },
+          {
+            "kind": "trajectory",
+            "steps": [
+              30
+            ],
+            "quote": "- **Output identical** \u2014 benchmark result hash unchanged (`d645ff23...`).\n- Verified equivalence across edge cases: IntEnum/StrEnum/float enums, hits/misses, `bool`\u2194`int`, aliases, custom `_missing_` returning a member, custom `_missing_` returning `None`, and strict mode."
+          }
+        ]
+      }
+    ],
+    "verifier_or_task_concern": null
+  },
+  "evidence": [
+    {
+      "claim": "The verifier failed the rollout on functional equivalence in gso_test_3, reporting binary_reward 0 and reward 0.0 before speedup scoring.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "trial/test_stdout.txt",
+          "line_start": 591,
+          "line_end": 602,
+          "quote": "Traceback (most recent call last):\n  File \"/tests/gso_test_3.py\", line 318, in <module>\n    main()\n...\nAssertionError: Mismatch at index 1: expected ONLY, got ValidationError\n>>>>> Tests Errored\nopt_commit: False, binary_reward: 0, reward: 0.0"
+        },
+        {
+          "kind": "file",
+          "file": "meta.json",
+          "line_start": 8,
+          "line_end": 12,
+          "quote": "\"verifier_signal\": {\n    \"binary_reward\": 0,\n    \"reward\": null,\n    \"status\": null,\n    \"reward_metric\": null"
+        }
+      ]
+    },
+    {
+      "claim": "Held-out gso_test_3 asserts per-index output strings match a baseline reference via check_equivalence.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "task/tests/gso_test_3.py",
+          "line_start": 252,
+          "line_end": 260,
+          "quote": "def check_equivalence(reference, current):\n    \"\"\"\n    Assert that two flat lists of result strings are identical.\n    \"\"\"\n    assert len(reference) == len(current), (\n        f\"Result lengths differ: {len(reference)} vs {len(current)}\"\n    )\n    for i, (r, c) in enumerate(zip(reference, current)):\n        assert r == c, f\"Mismatch at index {i}: expected {r}, got {c}\""
+        }
+      ]
+    },
+    {
+      "claim": "The task instruction requires functional equivalence and unchanged benchmark results while optimizing runtime.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "task/instruction.md",
+          "line_start": 1,
+          "line_end": 1,
+          "quote": "A Python repository is provided at `/workspace/pydantic__pydantic`. Optimize the runtime of the following benchmark while keeping the repository functionally equivalent."
+        },
+        {
+          "kind": "file",
+          "file": "task/instruction.md",
+          "line_start": 127,
+          "line_end": 127,
+          "quote": "Optimize the benchmark as much as you can while keeping its results unchanged. Aim for the best possible speedup across repeated runs."
+        }
+      ]
+    },
+    {
+      "claim": "Passing also requires a continuous geometric-mean speedup reward strictly above threshold 1.1.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "task/tests/test.sh",
+          "line_start": 69,
+          "line_end": 73,
+          "quote": "# --- Pass/Fail Threshold Check ---\nREWARD=$(cat /logs/verifier/reward.txt 2>/dev/null || echo \"0\")\nTHRESHOLD=1.1000\nPASS=$(python3 -c \"print(1 if float('$REWARD') > $THRESHOLD else 0)\")\necho $PASS > /logs/verifier/reward.txt"
+        }
+      ]
+    },
+    {
+      "claim": "The agent replaced to_enum with a _value2member_map_.get fast path for default-_missing_ enums that raises on a None lookup without trying enum_type(input_value) for ordinary misses.",
+      "citations": [
+        {
+          "kind": "trajectory",
+          "steps": [
+            13
+          ],
+          "quote": "member_get = enum_type._value2member_map_.get\n\n        def to_enum(input_value: Any, /) -> Enum:\n            try:\n                enum_member = member_get(input_value)\n            except TypeError:\n                # Unhashable input: defer to the full lookup, which scans members by equality.\n                try:\n                    return enum_type(input_value)\n                except ValueError:\n                    enum_member = None\n            if enum_member is not None:\n                return enum_member\n            raise PydanticCustomError('enum', 'Input should be {expected}', {'expected': expected})"
+        }
+      ]
+    },
+    {
+      "claim": "gso_test_3 exercises SingleEnum (default _missing_) and feeds both raw member values and enum member instances into TypeAdapter.validate_python.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "task/tests/gso_test_3.py",
+          "line_start": 150,
+          "line_end": 151,
+          "quote": "    class SingleEnum(Enum):\n        ONLY = 5"
+        },
+        {
+          "kind": "file",
+          "file": "task/tests/gso_test_3.py",
+          "line_start": 206,
+          "line_end": 212,
+          "quote": "        for _ in range(samples_per_enum):\n            if random.random() < 0.7:\n                # Valid input: choose raw or instance\n                if random.random() < 0.5:\n                    val = random.choice(valid_values[idx])\n                else:\n                    val = random.choice(valid_instances[idx])"
+        }
+      ]
+    },
+    {
+      "claim": "The verifier's first post-patch mismatch is on SingleEnum output name ONLY versus ValidationError, consistent with rejecting a valid enum-instance input on the fast path.",
+      "citations": [
+        {
+          "kind": "file",
+          "file": "trial/test_stdout.txt",
+          "line_start": 599,
+          "line_end": 600,
+          "quote": "    assert r == c, f\"Mismatch at index {i}: expected {r}, got {c}\"\nAssertionError: Mismatch at index 1: expected ONLY, got ValidationError"
+        },
+        {
+          "kind": "file",
+          "file": "task/tests/gso_test_3.py",
+          "line_start": 228,
+          "line_end": 235,
+          "quote": "    results = []\n    for idx, val in workload:\n        adapter = adapters[idx]\n        try:\n            inst = adapter.validate_python(val)\n            results.append(inst.name)\n        except ValidationError:\n            results.append('ValidationError')"
+        }
+      ]
+    },
+    {
+      "claim": "The agent's self-checks relied on the prompt benchmark result hash and a custom script that did not cover enum-instance inputs, then concluded equivalence was preserved.",
+      "citations": [
+        {
+          "kind": "trajectory",
+          "steps": [
+            28
+          ],
+          "quote": "assert ta.validate_python(IntE.A, strict=True) is IntE.A\ntry: ta.validate_python(1, strict=True); assert False\nexcept ValidationError: pass\n\nprint('ALL EQUIVALENCE TESTS PASSED')"
+        },
+        {
+          "kind": "trajectory",
+          "steps": [
+            29
+          ],
+          "quote": "FILES IN SYNC\ntimes [0.0601, 0.0613, 0.063, 0.0618, 0.0606] min 0.0601\nhash d645ff23e42888bfcca74641eab48488"
+        },
+        {
+          "kind": "trajectory",
+          "steps": [
+            30
+          ],
+          "quote": "- **Output identical** \u2014 benchmark result hash unchanged (`d645ff23...`).\n- Verified equivalence across edge cases: IntEnum/StrEnum/float enums, hits/misses, `bool`\u2194`int`, aliases, custom `_missing_` returning a member, custom `_missing_` returning `None`, and strict mode."
+        }
+      ]
+    }
+  ],
+  "outcome_rationale": "This is a genuine agent-fault failure where the verifier's FAIL is correct. The GSO verifier applied the agent's patch, ran held-out enum workloads with equivalence checking, and aborted on gso_test_3 with `AssertionError: Mismatch at index 1: expected ONLY, got ValidationError`, recording `binary_reward: 0` and `reward: 0.0` before any speedup threshold could be met [1][2]. The task required optimizing pydantic enum validation while keeping the repository functionally equivalent and benchmark results unchanged, with passing gated on a geometric-mean speedup above 1.1 [3][4]. The agent's sole substantive change rewrote `get_enum_core_schema`'s `to_enum` to use `_value2member_map_.get` for enums with the default `_missing_`, raising `PydanticCustomError` immediately when the lookup returns `None` instead of falling back to `enum_type(input_value)` [5]. That breaks cases where `TypeAdapter.validate_python` receives an already-constructed enum member: gso_test_3's `SingleEnum` workload deliberately mixes raw values and enum instances (`valid_instances`) [6][7], so index 1 can be `SingleEnum.ONLY` which baseline accepts as `ONLY` but the fast path rejects as `ValidationError` [2][7]. The agent declared success after its self-written prompt benchmark reported an unchanged result hash (~0.10s\u2192~0.06s) and a hand-rolled edge-case script that never passed enum instances as inputs, then stopped without catching the regression [8]. Because functional equivalence is a prerequisite to the continuous speedup reward and the patch introduced a real semantic bug on enum-instance inputs, the agent did not truly solve the task and TN is the right classification.",
+  "judge_verdict": {
+    "task_truly_solved": false,
+    "confidence": "high",
+    "summary": "The agent's enum fast-path broke validation of enum-member inputs, so the verifier's functional-equivalence failure is correct."
+  },
+  "verifier_signal": {
+    "binary_reward": 0,
+    "reward": null,
+    "status": null,
+    "reward_metric": null
+  }
+}
