@@ -9,6 +9,33 @@ function loadData() {
   return { index, base };
 }
 
+const quickStart = [
+  {
+    title: "Get the index",
+    command: "curl https://harbor-index.vercel.app/data/index.json | jq .",
+  },
+  {
+    title: "Get all verdicts",
+    command: "curl https://harbor-index.vercel.app/data/verdicts.json | jq .",
+  },
+  {
+    title: "Get one rollout's full verdict + evidence",
+    command: "curl https://harbor-index.vercel.app/data/per-rollout/gso-speedup-pandas-seq-to-range__BcSk2Xb.json | jq .",
+  },
+  {
+    title: "Get the agent's original trajectory",
+    command: "curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/agent.json | jq .",
+  },
+  {
+    title: "Get the judge's audit trajectory",
+    command: "curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/judge.json | jq .",
+  },
+  {
+    title: "Get the verifier log",
+    command: "curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/verifier.txt",
+  },
+];
+
 export default function DataPage() {
   const { index } = loadData();
   const sm = index.summary;
@@ -129,24 +156,24 @@ export default function DataPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-bold text-slate-900">Quick start for agents</h2>
-        <div className="overflow-x-auto rounded-lg bg-slate-900 p-5">
-          <code className="block whitespace-pre-wrap font-mono text-[0.8rem] leading-relaxed text-slate-200">{`# 1. Get the index
-curl https://harbor-index.vercel.app/data/index.json | jq .
-
-# 2. Get all verdicts
-curl https://harbor-index.vercel.app/data/verdicts.json | jq .
-
-# 3. Get one rollout's full verdict + evidence
-curl https://harbor-index.vercel.app/data/per-rollout/gso-speedup-pandas-seq-to-range__BcSk2Xb.json | jq .
-
-# 4. Get the agent's original trajectory
-curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/agent.json | jq .
-
-# 5. Get the judge's audit trajectory
-curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/judge.json | jq .
-
-# 6. Get the verifier log
-curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/verifier.txt`}</code>
+        <div className="space-y-3">
+          {quickStart.map((item, index) => (
+            <div
+              key={item.title}
+              className="rounded-lg border border-slate-800 p-4 shadow-sm"
+              style={{ backgroundColor: "#020617" }}
+            >
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: "#38bdf8" }}>
+                {index + 1}. {item.title}
+              </div>
+              <code
+                className="block overflow-x-auto whitespace-nowrap font-mono text-[0.8rem] leading-relaxed"
+                style={{ background: "transparent", color: "#facc15" }}
+              >
+                {item.command}
+              </code>
+            </div>
+          ))}
         </div>
       </section>
     </div>
