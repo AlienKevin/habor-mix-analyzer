@@ -130,7 +130,7 @@ export default function DataPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-bold text-slate-900">Quick start for agents</h2>
         <div className="overflow-x-auto rounded-lg bg-slate-900 p-5">
-          <pre className="m-0 whitespace-pre-wrap font-mono text-[0.8rem] leading-relaxed text-slate-200">{`# 1. Get the index
+          <code className="block whitespace-pre-wrap font-mono text-[0.8rem] leading-relaxed text-slate-200">{`# 1. Get the index
 curl https://harbor-index.vercel.app/data/index.json | jq .
 
 # 2. Get all verdicts
@@ -146,7 +146,7 @@ curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range_
 curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/judge.json | jq .
 
 # 6. Get the verifier log
-curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/verifier.txt`}</pre>
+curl https://harbor-index.vercel.app/audit-traj/gso-speedup-pandas-seq-to-range__BcSk2Xb/verifier.txt`}</code>
         </div>
       </section>
     </div>
